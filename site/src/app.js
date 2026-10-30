@@ -1,6 +1,6 @@
 const { getNetWeight, seedTrips, vehicleTareChecks } = window;
 const operationsData = window.operationsDemoData;
-const { parseDemoCsv } = window;
+const parseCsvFile = window.parseDemoCsv;
 
 const navItems = [
   { id: "workbench", label: "运营监控", icon: "workbench" },
@@ -1195,7 +1195,7 @@ function renderApp(root) {
     let rows = null;
     if (extension === ".csv") {
       try {
-        rows = parseDemoCsv(text).slice(0, 7).map((row) => ({ lineNo: row.lineNo, cells: row.cells.slice(0, 6) }));
+        rows = parseCsvFile(text).slice(0, 7).map((row) => ({ lineNo: row.lineNo, cells: row.cells.slice(0, 6) }));
         lines = rows.map(({ lineNo, cells }) => ({ lineNo, line: cells.join(" · ") }));
       } catch (error) {
         notice = error.message;
