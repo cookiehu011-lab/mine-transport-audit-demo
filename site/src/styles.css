@@ -856,4 +856,17 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
   .answer-metrics { grid-template-columns: 1fr; }
   .answer-metrics > div + div { border-top: 1px solid #e8edf1; border-left: 0; }
 }
+.sidebar-user { margin-top: auto; }
+.app-topbar { gap: 14px; }
+.global-context { min-width: 0; flex: 1; flex-wrap: nowrap; }
+.global-context > strong, .global-context .topbar-select, .topbar-actions, .operator-name { flex: 0 0 auto; white-space: nowrap; }
+.global-context .module-search { width: min(300px, 26vw); }
+.mine-map { background-color: #0c1420; background-image: linear-gradient(180deg,#0c172155,#111d2744), url("../public/images/mine-open-pit-map.png"); background-position: center, center 48%; background-size: cover, cover; background-repeat: no-repeat, no-repeat; }
+.monitor-layout { grid-template-rows: minmax(0, 1fr); }
+.monitor-map-column { height: 100%; }
+.monitor-search { max-width: calc(100% - 36px); }
+@media (max-width: 900px) {
+  .global-context { flex-wrap: wrap; }
+  .global-context .module-search { width: 100%; }
+}
 
