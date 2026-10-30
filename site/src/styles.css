@@ -872,3 +872,72 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
   .global-context .module-search { width: 100%; }
 }
 
+/* Direct map tiles and intent-specific answer layouts. */
+.mine-map { background: #18232c; }
+.mine-map::after { display: none; }
+.mine-map-canvas { position: absolute; inset: 0; z-index: 0; height: 100%; min-height: 420px; }
+.map-layer-label, .map-legend, .map-scale { z-index: 450; }
+.map-layer-label { top: 15px; left: 18px; }
+.map-legend { bottom: 42px; }
+.map-scale { max-width: calc(100% - 250px); padding: 5px 8px; border-radius: 4px; background: #ffffffe6; color: #2f4252; }
+.leaflet-control-attribution { font-size: 10px !important; }
+.leaflet-control-zoom a { color: #24374b !important; }
+.leaflet-tile { filter: brightness(.78) saturate(.72) contrast(1.06); }
+.map-site-marker, .map-truck-marker { border: 0 !important; background: transparent !important; }
+.map-site-marker { display: flex; align-items: center; width: max-content !important; gap: 7px; }
+.map-site-marker strong { padding: 3px 6px; border: 1px solid #ffffff90; border-radius: 4px; background: #152332df; color: #f3f7fa; font-size: 11px; font-weight: 650; white-space: nowrap; text-shadow: 0 1px 2px #101a27; }
+.map-site-dot { width: 15px; height: 15px; flex: 0 0 15px; border: 2px solid #d6fff5; border-radius: 50%; background: #328b76; box-shadow: 0 1px 5px #101a27aa; }
+.map-site-dot.scale { border-color: #b7f8fc; background: #167f91; }
+.map-site-dot.unload { border-color: #ffe2be; background: #b97836; }
+.map-truck-marker { display: grid; place-items: center; }
+.map-truck-symbol { display: grid; width: 40px; height: 34px; place-items: center; }
+.map-truck-symbol svg { width: 38px; height: 29px; overflow: visible; filter: drop-shadow(0 2px 2px #09131eaa); }
+.map-truck-symbol svg circle { fill: #192a39; }
+.map-truck-symbol.selected svg { filter: drop-shadow(0 0 5px #13d5df) drop-shadow(0 2px 2px #09131eaa); }
+.map-truck-label { border: 0 !important; background: #142331e8 !important; color: #f5fafb !important; font-size: 11px; font-weight: 650; }
+.map-truck-label::before { border-top-color: #142331e8 !important; }
+.map-load-error { position: absolute; z-index: 800; top: 56px; left: 14px; padding: 7px 10px; border: 1px solid #e5b977; border-radius: 4px; background: #fff6e9; color: #77501f; font-size: 11px; }
+.answer-actions { flex-wrap: wrap; }
+.answer-table { overflow: hidden; margin: 10px 0; border: 1px solid #dfe8ee; border-radius: 6px; background: #fff; }
+.answer-table > div, .answer-table > button { display: grid; grid-template-columns: minmax(0, 1fr) 120px 110px; align-items: center; gap: 8px; width: 100%; padding: 9px 11px; border: 0; border-top: 1px solid #e9eef2; background: transparent; color: #35485c; text-align: left; font: inherit; font-size: 11px; }
+.answer-table > div:first-child { border-top: 0; background: #f4f7f9; color: #68788a; font-size: 10px; }
+.answer-table > button { cursor: pointer; }
+.answer-table > button:hover { background: #f5fbfc; }
+.answer-table .status { justify-self: start; }
+.answer-operation-summary .answer-metrics, .answer-vehicle-capacity .answer-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.daily-unload-table { max-height: 290px; overflow: auto; }
+.daily-unload-table > div { grid-template-columns: 110px minmax(0,1fr) 90px 50px; }
+.daily-unload-table > div:first-child { position: sticky; top: 0; z-index: 1; }
+.daily-unload-table .text-button { justify-self: start; font-size: 10px; }
+.unload-breakdown > div { grid-template-columns: minmax(0, 1fr) 120px 110px; }
+.answer-note { margin: 9px 0; padding: 9px 11px; border-radius: 5px; background: #f2f6f8; color: #516477; font-size: 11px; line-height: 1.6; }
+.anomaly-note { border: 1px solid #f0d3ad; background: #fff7ec; color: #87541d; }
+.chat-trend { display: flex; height: 112px; align-items: end; gap: 3px; margin-top: 10px; padding: 8px 9px 0; border-bottom: 1px solid #dce4ea; background: linear-gradient(180deg,#fff,#f7fafc); }
+.chat-trend > span { display: flex; min-width: 2px; height: var(--bar-height); flex: 1; align-items: end; }
+.chat-trend i { display: block; width: 100%; min-height: 5px; border-radius: 2px 2px 0 0; background: linear-gradient(180deg,#2ac1c9,#168899); }
+.chat-trend-range { display: flex; justify-content: space-between; padding: 5px 2px; color: #78889a; font-size: 10px; }
+.chat-trend-range strong { color: #586a7b; font-weight: 550; }
+.answer-breakdown { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 9px 0; }
+.answer-breakdown > span { display: grid; grid-template-columns: 8px 1fr; gap: 4px 6px; align-items: center; padding: 8px; border: 1px solid #e4eaee; border-radius: 5px; color: #647587; font-size: 10px; }
+.answer-breakdown i { width: 7px; height: 7px; border-radius: 50%; background: #19a7b5; }
+.answer-breakdown strong { grid-column: 2; color: #283e53; font-size: 12px; }
+.answer-anomalies { display: grid; gap: 7px; margin: 10px 0; }
+.answer-anomalies > button { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px 12px; align-items: center; padding: 10px 11px; border: 1px solid #efd5b5; border-radius: 5px; background: #fffaf3; color: #425367; text-align: left; cursor: pointer; }
+.answer-anomalies > button > span:first-child { display: grid; gap: 4px; }
+.answer-anomalies strong { color: #88521c; font-size: 11px; }
+.answer-anomalies small { color: #78889a; font-size: 10px; }
+.answer-anomalies > button > span:nth-child(2) { grid-column: 1; color: #526578; font-size: 11px; }
+.answer-anomalies > button > b { grid-column: 2; grid-row: 1 / span 2; color: #956021; font-size: 10px; }
+.report-preview { margin: 10px 0; padding: 12px; border: 1px solid #dbe6ed; border-radius: 6px; background: #fff; }
+.report-preview > strong { color: #2d4359; font-size: 12px; }
+.report-preview ul { display: grid; gap: 6px; margin: 9px 0; padding-left: 18px; color: #55697c; font-size: 11px; line-height: 1.55; }
+.report-preview small { color: #77889a; font-size: 10px; }
+@media (max-width: 700px) {
+  .answer-table > div, .answer-table > button, .unload-breakdown > div { grid-template-columns: minmax(0, 1fr) 90px 85px; gap: 5px; padding: 8px 7px; font-size: 10px; }
+  .answer-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .answer-metrics > div:nth-child(3) { border-left: 0; border-top: 1px solid #e8edf1; }
+  .answer-metrics > div:nth-child(4) { border-top: 1px solid #e8edf1; }
+  .answer-breakdown { grid-template-columns: 1fr; }
+  .map-scale { max-width: 68%; font-size: 9px; }
+}
+

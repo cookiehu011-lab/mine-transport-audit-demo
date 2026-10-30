@@ -53,6 +53,10 @@ let selectedVehiclePlate = "蒙A·67890";
 let eventCursor = 0;
 let simulationRunning = false;
 let simulationTimer = null;
+let mineMap = null;
+let mineMapElement = null;
+let mineMapVehicles = new Map();
+let mineMapRoutes = new Map();
 let notice = "";
 let workflowForm = null;
 
@@ -184,13 +188,6 @@ function renderWorkbenchRow(trip) {
   `;
 }
 
-function routeSvgPoints(raw) {
-  return raw.split(" ").map((pair) => {
-    const [x, y] = pair.split(",").map(Number);
-    return `${x * 10},${y * 7}`;
-  }).join(" ");
-}
-
 function mapVehiclePosition(vehicle) {
   if (!replayActive) return { x: vehicle.x, y: vehicle.y };
   const index = operationsData.map.vehicles.indexOf(vehicle);
@@ -205,25 +202,96 @@ function mapVehiclePosition(vehicle) {
   return { x: start[0] + (end[0] - start[0]) * fraction, y: start[1] + (end[1] - start[1]) * fraction };
 }
 
+function mapCoordinate(point) {
+  const [centerLat, centerLng] = operationsData.map.center;
+  return [centerLat + (50 - point.y) * 0.00055, centerLng + (point.x - 50) * 0.0007];
+}
+
+function truckMapIcon(selected) {
+  const color = selected ? "#0bb7c6" : "#22384c";
+  return L.divIcon({
+    className: "map-truck-marker",
+    html: `<span class="map-truck-symbol ${selected ? "selected" : ""}"><svg viewBox="0 0 32 24" aria-hidden="true"><path d="M2 4h18v13H2zM20 8h6l4 5v4h-10z" fill="${color}"/><path d="M21 9h4l3 4h-7z" fill="#d9f8fa"/><circle cx="8" cy="19" r="3"/><circle cx="24" cy="19" r="3"/></svg></span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
+
+function mountMineMap(root) {
+  const placeholder = root.querySelector("#mine-map-canvas");
+  if (!placeholder) return;
+  if (mineMapElement && mineMap) {
+    placeholder.replaceWith(mineMapElement);
+    mineMap.invalidateSize({ pan: false });
+    syncMineMap();
+    return;
+  }
+  if (!mineMapElement) mineMapElement = placeholder;
+  if (!window.L) {
+    placeholder.innerHTML = '<div class="map-load-error">地图组件暂不可用</div>';
+    return;
+  }
+  mineMap = L.map(placeholder, { zoomControl: false, preferCanvas: true }).setView(operationsData.map.center, operationsData.map.zoom);
+  L.control.zoom({ position: "topright" }).addTo(mineMap);
+  const mapStatus = document.createElement("div");
+  mapStatus.className = "map-load-error";
+  mapStatus.hidden = true;
+  placeholder.append(mapStatus);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  }).on("tileerror", () => {
+    mapStatus.textContent = "底图暂不可用 · 示意路线和车辆仍为模拟数据";
+    mapStatus.hidden = false;
+  }).on("tileload", () => {
+    mapStatus.hidden = true;
+  }).addTo(mineMap);
+  operationsData.map.routes.forEach((route) => {
+    const points = route.points.split(" ").map((pair) => {
+      const [x, y] = pair.split(",").map(Number);
+      return mapCoordinate({ x, y });
+    });
+    mineMapRoutes.set(route.tripId, L.polyline(points, { color: "#93a6b5", weight: 5, opacity: 0.72 }).addTo(mineMap));
+  });
+  operationsData.map.nodes.forEach((node) => {
+    const marker = L.marker(mapCoordinate(node), {
+      icon: L.divIcon({ className: "map-site-marker", html: `<span class="map-site-dot ${node.type === "卸货点" ? "unload" : node.type === "承重点" ? "scale" : "pit"}"></span><strong>${node.label}</strong>`, iconSize: [120, 28], iconAnchor: [9, 10] }),
+      interactive: false,
+    }).addTo(mineMap);
+  });
+  operationsData.map.vehicles.forEach((vehicle) => {
+    const marker = L.marker(mapCoordinate(vehicle), { icon: truckMapIcon(false), zIndexOffset: 400, title: vehicle.plate }).addTo(mineMap);
+    marker.bindTooltip(vehicle.plate, { direction: "top", offset: [0, -12], className: "map-truck-label" });
+    marker.on("click", () => {
+      selectedMapPlate = vehicle.plate;
+      render(root);
+    });
+    mineMapVehicles.set(vehicle.plate, marker);
+  });
+  syncMineMap();
+}
+
+function syncMineMap() {
+  if (!mineMap) return;
+  const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
+  operationsData.map.routes.forEach((route) => {
+    mineMapRoutes.get(route.tripId)?.setStyle(selected?.tripId === route.tripId ? { color: "#0bb7c6", weight: 6, opacity: 0.96 } : { color: "#617487", weight: 4, opacity: 0.72 });
+  });
+  operationsData.map.vehicles.forEach((vehicle) => {
+    const position = mapVehiclePosition(vehicle);
+    const marker = mineMapVehicles.get(vehicle.plate);
+    marker?.setLatLng(mapCoordinate(position));
+    marker?.setIcon(truckMapIcon(selectedMapPlate === vehicle.plate));
+  });
+}
+
 function renderMineMap() {
-  const selectedVehicle = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
   return `
     <section class="mine-map" aria-label="矿区模拟路线图">
-      <svg class="mine-map-svg" viewBox="0 0 1000 700" role="img" aria-label="采区、承重点、卸货点和模拟车辆路线">
-        <g class="map-contours" aria-hidden="true">
-          <path d="M20 140 C140 45 290 90 340 170 S530 260 670 170 900 75 990 130"/><path d="M-20 170 C120 75 270 120 320 200 S520 290 650 200 900 105 1020 160"/>
-          <path d="M15 560 C140 450 250 490 330 550 S530 640 650 550 880 455 990 520"/><path d="M-10 590 C120 480 240 520 310 580 S510 670 630 580 900 485 1010 550"/>
-          <path d="M500 20 C410 120 440 200 500 270 S600 430 540 520 510 630 570 700"/><path d="M530 0 C440 120 470 200 530 270 S630 430 570 520 540 630 600 700"/>
-          <path d="M90 300 C180 250 260 300 340 350 S490 390 580 330 770 280 910 350"/><path d="M70 330 C170 280 250 330 320 380 S480 420 560 360 770 310 930 380"/>
-        </g>
-        <g class="map-roads" aria-hidden="true">${operationsData.map.routes.map((route) => `<polyline class="map-route ${selectedVehicle?.tripId === route.tripId ? "selected" : ""}" points="${routeSvgPoints(route.points)}"/>`).join("")}</g>
-        <g class="map-nodes">${operationsData.map.nodes.map((node) => `<g class="map-node ${node.type === "卸货点" ? "unload" : node.type === "承重点" ? "scale" : "pit"}" transform="translate(${node.x * 10} ${node.y * 7})"><circle r="12"/><text x="17" y="4">${node.label}</text></g>`).join("")}</g>
-        <g class="map-trucks">${operationsData.map.vehicles.map((vehicle) => { const position = mapVehiclePosition(vehicle); return `<g class="map-truck ${selectedMapPlate === vehicle.plate ? "selected" : ""}" transform="translate(${position.x * 10} ${position.y * 7})" data-map-vehicle="${vehicle.plate}" tabindex="0" role="button" aria-label="查看 ${vehicle.plate} 路线"><circle class="truck-halo" r="18"/><path d="M-10 -5h12l4 5H8v6H-10zM2 -3v4h5"/><circle cx="-5" cy="7" r="2"/><circle cx="5" cy="7" r="2"/><text x="14" y="-8">${vehicle.plate}</text></g>`; }).join("")}</g>
-      </svg>
-      <div class="map-north"><span>N</span><b>▲</b></div>
-      <div class="map-layer-label">示例矿区 · 地貌底图</div>
+      <div id="mine-map-canvas" class="mine-map-canvas" role="application" aria-label="交互式矿山地图，车辆和路线均为模拟数据"></div>
+      <div class="map-layer-label">示例矿区 · 模拟坐标</div>
       <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span></div>
-      <div class="map-scale">示意路线 · 非现场 GIS / GPS</div>
+      <div class="map-scale">${operationsData.map.locationLabel} · 示意路线 · 非现场 GPS</div>
     </section>
   `;
 }
@@ -685,27 +753,47 @@ function renderSourceRecord(id) {
   return `<aside class="source-record-detail"><div><span>示例汇总来源</span><strong>${record.id}</strong></div><p>${record.date} · ${record.metric} ${record.value.toLocaleString()} ${record.unit}</p><small>${record.source} · ${record.scope}</small></aside>`;
 }
 
+function renderChatTrend(rows, key) {
+  const max = Math.max(...rows.map((row) => row[key]), 1);
+  return `<div class="chat-trend" role="img" aria-label="28天采矿量示例趋势">${rows.map((row) => `<span title="${row.date} · ${row[key]} 吨" style="--bar-height:${Math.max(8, row[key] / max * 100)}%"><i></i></span>`).join("")}</div><div class="chat-trend-range"><span>${rows[0]?.date || "—"}</span><strong>${rows.length} 天 · 吨</strong><span>${rows.at(-1)?.date || "—"}</span></div>`;
+}
+
 function renderChatAnswer(item) {
   if (!item) return "";
-  let answer = item.answer;
-  let metricResult = "";
-  if (item.intent === "daily-operation") {
+  let detail = "";
+  let action = "";
+  if (item.resultType === "operation-summary") {
     const verified = getVerifiedTrips();
     const pending = getUnresolvedTrips();
     const total = verified.reduce((sum, trip) => sum + getNetWeight(trip), 0);
-    answer = `示例范围内有 ${seedTrips.length} 趟运输记录，${verified.length} 趟人工核实通过，${pending.length} 趟待复核；只有核实通过记录计入结算预览。卸货接收量来自独立示例卸点磅单。`;
-    metricResult = `<div class="answer-metrics"><div><span>运输趟次</span><strong>${seedTrips.length} 趟</strong></div><div><span>核实通过净重</span><strong>${formatWeight(total)} 吨</strong></div><div><span>待复核</span><strong>${pending.length} 趟</strong></div></div>`;
-  } else if (item.intent === "vehicle-capacity" || item.intent === "vehicle-month-capacity") {
-    const vehicle = operationsData.vehiclePeriods.find((record) => record.plate === "晋B·24680" && record.periodKey === (item.intent === "vehicle-month-capacity" ? "month" : "week"));
-    metricResult = `<div class="answer-metrics"><div><span>有效趟次 · 扩展示例</span><strong>${vehicle.trips} 趟</strong></div><div><span>核实净重</span><strong>${vehicle.verifiedTons.toFixed(1)} 吨</strong></div><div><span>均载 / 周转</span><strong>${vehicle.averagePayload.toFixed(2)} 吨 · ${vehicle.turnaroundMinutes} 分</strong></div></div>`;
-  } else if (item.intent === "production-trend" || item.intent === "unload-trend") {
-    const totals = operationsData.dailyMetrics.reduce((sum, row) => ({ mined: sum.mined + row.minedTons, transport: sum.transport + row.verifiedTransportTons, unload: sum.unload + row.receivedUnloadTons }), { mined: 0, transport: 0, unload: 0 });
-    metricResult = `<div class="answer-metrics"><div><span>采矿量</span><strong>${totals.mined.toLocaleString()} 吨</strong></div><div><span>核实运输净重</span><strong>${totals.transport.toLocaleString()} 吨</strong></div><div><span>卸货接收量</span><strong>${totals.unload.toLocaleString()} 吨</strong></div></div>`;
-    answer = `28天扩展示例分别汇总为采矿量 ${totals.mined.toLocaleString()} 吨、核实运输净重 ${totals.transport.toLocaleString()} 吨、卸货接收量 ${totals.unload.toLocaleString()} 吨。三个口径来自独立示例来源，不能直接互相替代。`;
-  } else if (item.intent === "anomaly-review") {
-    answer = `当前有 ${getOpenAnomalies().length} 条AI异常线索待人工复核。线索只用于核对路线、卸货记录、影像和称重历史，不等于作弊结论。`;
+    const day = operationsData.dailyMetrics.find((row) => row.date === "2026-04-01");
+    detail = `<div class="answer-metrics"><div><span>运输趟次</span><strong>${seedTrips.length} 趟</strong></div><div><span>核实通过</span><strong>${verified.length} 趟 · ${formatWeight(total)} 吨</strong></div><div><span>待复核</span><strong>${pending.length} 趟</strong></div><div><span>卸货接收量</span><strong>${day?.receivedUnloadTons ?? "—"} 吨</strong></div></div><div class="answer-table"><div><span>趟次 / 车辆</span><span>净重</span><span>人工状态</span></div>${seedTrips.map((trip) => `<button data-open-trip="${trip.id}"><span>${trip.id} · ${trip.plate}</span><span>${formatWeight(getNetWeight(trip))} 吨</span><span>${statusPill(getStatus(trip))}</span></button>`).join("")}</div>`;
+    action = '<button class="button secondary" data-view="audit">打开运输稽核</button>';
+  } else if (item.resultType === "vehicle-capacity") {
+    const vehicle = operationsData.vehiclePeriods.find((record) => record.sourceRecordId === item.sourceRecordIds[0]);
+    detail = `<div class="answer-metrics"><div><span>有效趟次</span><strong>${vehicle.trips} 趟</strong></div><div><span>核实净重</span><strong>${vehicle.verifiedTons.toFixed(1)} 吨</strong></div><div><span>均载重</span><strong>${vehicle.averagePayload.toFixed(2)} 吨</strong></div><div><span>平均周转</span><strong>${vehicle.turnaroundMinutes} 分</strong></div></div><div class="answer-note">缺少额定载荷与可运营时长，暂不计算利用率。</div>`;
+    action = `<button class="button secondary" data-open-vehicle="${item.plate}">查看 ${item.plate} 档案</button>`;
+  } else if (item.resultType === "production-trend") {
+    const rows = operationsData.dailyMetrics;
+    const total = rows.reduce((sum, row) => sum + row.minedTons, 0);
+    const areas = [...new Set(rows.map((row) => row.miningArea))].map((area) => ({ area, total: rows.filter((row) => row.miningArea === area).reduce((sum, row) => sum + row.minedTons, 0) }));
+    detail = `<div class="answer-metrics"><div><span>周期采矿量</span><strong>${total.toLocaleString()} 吨</strong></div><div><span>统计日期</span><strong>${rows.length} 天</strong></div><div><span>采区数</span><strong>${areas.length} 个</strong></div></div>${renderChatTrend(rows, "minedTons")}<div class="answer-breakdown">${areas.map((area) => `<span><i></i>${area.area}<strong>${area.total.toLocaleString()} 吨</strong></span>`).join("")}</div>`;
+    action = '<button class="button secondary" data-view="analytics">查看生产与运力分析</button>';
+  } else if (item.resultType === "unload-trend") {
+    const rows = operationsData.dailyMetrics;
+    const total = rows.reduce((sum, row) => sum + row.receivedUnloadTons, 0);
+    const groups = [...new Set(rows.map((row) => row.unloadPoint))].map((point) => ({ point, total: rows.filter((row) => row.unloadPoint === point).reduce((sum, row) => sum + row.receivedUnloadTons, 0) }));
+    detail = `<div class="answer-metrics"><div><span>周期接收量</span><strong>${total.toLocaleString()} 吨</strong></div><div><span>卸货点</span><strong>${groups.length} 个</strong></div><div><span>日明细</span><strong>${rows.length} 天</strong></div></div><div class="answer-breakdown">${groups.map((group) => `<span><i></i>${group.point}<strong>${group.total.toLocaleString()} 吨</strong></span>`).join("")}</div><div class="answer-table daily-unload-table"><div><span>日期</span><span>卸货点</span><span>接收量</span><span>来源</span></div>${rows.map((row) => `<div><span>${row.date}</span><span>${row.unloadPoint}</span><strong>${row.receivedUnloadTons} 吨</strong><button class="text-button" data-source-record="${row.sourceIds.unload}">查看</button></div>`).join("")}</div><div class="answer-note">按卸点接收磅单单独统计；不以运输净重替代接收量。</div>`;
+    action = '<button class="button secondary" data-view="analytics">查看卸货趋势</button>';
+  } else if (item.resultType === "anomaly-list") {
+    const anomalies = getOpenAnomalies();
+    detail = `<div class="answer-note anomaly-note">${anomalies.length} 条待复核线索 · AI提示不等于违规结论</div><div class="answer-anomalies">${anomalies.map((trip) => `<button data-open-trip="${trip.id}"><span><strong>${escapeHtml(trip.issue)}</strong><small>${trip.id} · ${trip.plate} · ${trip.occurredAt.replace("T", " ")}</small></span><span>${escapeHtml(eventText(trip))}</span><b>查看 ›</b></button>`).join("") || '<div class="empty-state">当前没有待复核异常线索</div>'}</div>`;
+    action = '<button class="button secondary" data-view="audit">进入运输稽核</button>';
+  } else if (item.resultType === "report-preview") {
+    detail = `<div class="report-preview"><strong>报告内容</strong><ul><li>车辆有效趟次、核实净重、均载重与周转时长</li><li>卸点接收趋势与独立数据口径</li><li>汇总来源和关联记录</li></ul><small>范围：${item.period} · 示例数据</small></div>`;
+    action = '<button class="button primary" data-generate-report>生成报告</button>';
   }
-  return `<article class="chat-answer"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>查询结果</strong><small>${item.period}</small></div></div><p>${escapeHtml(answer)}</p>${metricResult}<div class="answer-scope"><div><span>查询范围</span><strong>${item.period}</strong></div><div><span>指标口径</span><strong>${item.metric}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${source}</small>`).join("")}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}<div class="answer-actions"><button class="button primary" data-generate-report>生成报告</button><span>示例查询 · 仅供业务验证</span></div></article>`;
+  return `<article class="chat-answer answer-${item.resultType}"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>${escapeHtml(item.question)}</strong><small>${item.period} · 示例数据</small></div></div><p>${escapeHtml(item.answer)}</p>${detail}<div class="answer-scope"><div><span>指标口径</span><strong>${item.metric}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${source}</small>`).join("")}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}${action ? `<div class="answer-actions">${action}</div>` : ""}</article>`;
 }
 
 function renderFilePreview() {
@@ -811,6 +899,7 @@ function render(root, focusSearch = null) {
       ${renderLightbox()}
     </div>
   `;
+  if (activeView === "workbench") requestAnimationFrame(() => mountMineMap(root));
   if (focusSearch) {
     const input = root.querySelector(`[data-search-for="${focusSearch.view}"]`);
     input?.focus();
