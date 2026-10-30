@@ -1,6 +1,7 @@
 const { getNetWeight, seedTrips, vehicleTareChecks } = window;
 const operationsData = window.operationsDemoData;
 const parseCsvFile = window.parseDemoCsv;
+const buildFileReport = window.buildDemoFileReport;
 
 const navItems = [
   { id: "workbench", label: "运营监控", icon: "workbench" },
@@ -717,7 +718,7 @@ function renderAiWorkbench() {
       ${chatQuestion ? `<div class="user-question">${escapeHtml(chatQuestion)}</div>` : ""}${renderChatAnswer(item)}${chatQuestion && !item ? `<div class="chat-answer"><p>当前演示支持运输汇总、车辆运力、采矿趋势、卸货接收和异常查询。请选择一个示例问题查看来源化结果。</p></div>` : ""}
       <form class="chat-composer" data-chat-form><input name="question" value="${escapeHtml(chatQuestion)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="button primary" type="submit">查询</button></form>
       <div class="report-list"><div class="section-heading"><h3>已生成报告</h3><span>${reports.length} 份</span></div>${reports.length ? reports.map((report, index) => `<div class="report-row"><span><strong>${escapeHtml(report.title)}</strong><small>${report.createdAt} · ${report.origin}</small></span><button class="text-button" data-download-report="${index}">下载 .md</button></div>`).join("") : '<div class="empty-state compact">还没有生成报告</div>'}</div>
-    </section><aside class="file-column"><div class="file-column-heading"><h2>文件报告</h2><span>解析后由你确认</span></div><label class="upload-button"><input type="file" data-file-upload accept=".csv,.txt,.md,text/csv,text/plain,text/markdown"/><span>＋ 上传 CSV / TXT / MD</span></label>${renderFilePreview()}<div class="uploaded-list">${fileReports.length ? fileReports.map((report, index) => `<div class="uploaded-row"><strong>${escapeHtml(report.name)}</strong><small>文件来源 · 已确认</small><button class="text-button" data-download-file-report="${index}">查看报告</button></div>`).join("") : '<div class="file-empty">支持 CSV、TXT、MD；内容预览和确认后才整理报告。</div>'}</div></aside></div>
+    </section><aside class="file-column"><div class="file-column-heading"><h2>文件报告</h2><span>解析后由你确认</span></div><label class="upload-button"><input type="file" data-file-upload accept=".csv,.txt,.md,text/csv,text/plain,text/markdown"/><span>＋ 上传 CSV / TXT / MD</span></label>${renderFilePreview()}<div class="uploaded-list">${fileReports.length ? fileReports.map((report, index) => `<div class="uploaded-row"><strong>${escapeHtml(report.name)}</strong><small>文件来源 · 已确认</small><button class="text-button" data-download-file-report="${index}">下载报告</button></div>`).join("") : '<div class="file-empty">支持 CSV、TXT、MD；内容预览和确认后才整理报告。</div>'}</div></aside></div>
   `;
 }
 
@@ -1053,7 +1054,7 @@ function handleClick(root, event) {
   }
   if (event.target.closest("[data-confirm-upload]")) {
     if (pendingUpload) {
-      fileReports.unshift({ ...pendingUpload, content: `# 文件整理报告\n\n文件：${pendingUpload.name}\n\n来源：用户上传文件，独立于平台运营统计\n\n## 内容摘要\n\n${pendingUpload.excerpt}\n\n## 来源记录\n\n${pendingUpload.type} 文件 · ${pendingUpload.sourceRef}` });
+      fileReports.unshift({ ...pendingUpload, content: buildFileReport(pendingUpload) });
       notice = "文件来源报告已整理，未并入平台统计";
       pendingUpload = null;
     }
