@@ -808,6 +808,7 @@ function handleClick(root, event) {
   const selectTrip = event.target.closest("[data-select-trip]");
   if (selectTrip) {
     selectedTripId = selectTrip.dataset.selectTrip;
+    notice = "";
     render(root);
     return;
   }
