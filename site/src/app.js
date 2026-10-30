@@ -1,10 +1,12 @@
 const { getNetWeight, seedTrips, vehicleTareChecks } = window;
+const operationsData = window.operationsDemoData;
+const { parseDemoCsv } = window;
 
 const navItems = [
-  { id: "workbench", label: "工作台", icon: "workbench" },
+  { id: "workbench", label: "运营监控", icon: "workbench" },
   { id: "audit", label: "运输稽核", icon: "audit" },
-  { id: "vehicles", label: "车辆档案", icon: "vehicles" },
-  { id: "settlement", label: "结算预览", icon: "settlement" },
+  { id: "analytics", label: "生产与运力分析", icon: "analytics" },
+  { id: "ai", label: "AI工作台", icon: "ai" },
 ];
 
 const statusLabels = {
@@ -22,8 +24,25 @@ const followUpCases = Object.fromEntries(
 );
 let customerExperience = null;
 const plates = [...new Set(seedTrips.map((trip) => trip.plate))];
-const searchValues = { workbench: "", audit: "", vehicles: "", settlement: "" };
+const searchValues = { workbench: "", audit: "", vehicles: "", settlement: "", analytics: "" };
 const eventQueue = [];
+let selectedMapPlate = operationsData.map.vehicles[0].plate;
+let analyticsPeriod = "week";
+let analyticsDate = operationsData.dailyMetrics.at(-1).date;
+let selectedChat = null;
+let chatQuestion = "";
+let chatAnswer = null;
+let reports = [];
+let pendingUpload = null;
+let fileReports = [];
+let selectedSourceId = null;
+let vehicleReturnView = "workbench";
+let detailReturnView = "workbench";
+let replayPlaying = false;
+let replayActive = false;
+let replayCursor = 0;
+let replayProgress = 0;
+let replayTimer = null;
 
 let activeView = "workbench";
 let selectedTripId = "T-0401-007";
@@ -56,6 +75,8 @@ const iconPaths = {
   audit: '<path d="M5 4.75h10l3 3v11.5H5z"/><path d="M14.75 4.75v3.5h3.5M8 12h7M8 15.5h5"/>',
   vehicles: '<path d="M3 7h12l3 5v6H3z"/><path d="M18 12h3v5h-3M7 18.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17 18.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/>',
   settlement: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+  analytics: '<path d="M4 19V5M4 19h17M8 15l4-4 3 2 5-6"/><circle cx="8" cy="15" r="1"/><circle cx="12" cy="11" r="1"/><circle cx="15" cy="13" r="1"/>',
+  ai: '<path d="M12 3v3M5.6 5.6l2.1 2.1M3 12h3M5.6 18.4l2.1-2.1M12 18v3M18.4 18.4l-2.1-2.1M18 12h3M18.4 5.6l-2.1 2.1"/><circle cx="12" cy="12" r="4"/>',
 };
 
 function icon(name) {
@@ -63,12 +84,13 @@ function icon(name) {
 }
 
 function renderNav() {
+  const currentView = activeView === "vehicles" ? vehicleReturnView : activeView === "settlement" ? detailReturnView : activeView;
   return `
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">秤</span><span>矿山运输稽核</span></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">矿</span><span>矿山运营平台</span></div>
       <nav aria-label="主导航">
         ${navItems.map((item) => `
-          <button class="nav-item ${activeView === item.id ? "active" : ""}" data-view="${item.id}" ${activeView === item.id ? 'aria-current="page"' : ""}>
+          <button class="nav-item ${currentView === item.id ? "active" : ""}" data-view="${item.id}" ${currentView === item.id ? 'aria-current="page"' : ""}>
             ${icon(item.icon)}<span>${item.label}</span>
             ${item.id === "audit" ? `<span class="nav-count">${getUnresolvedTrips().length}</span>` : ""}
           </button>
@@ -103,6 +125,12 @@ function matchesTrip(trip, value, fields) {
 function renderPageHeader(title) {
   return `<header class="page-header"><h1>${title}</h1><span class="sample-tag">示例数据</span></header>`;
 }
+
+function renderContextBack(view, label) {
+  return `<div class="context-back"><button class="text-button" data-back-context="${view}">‹ 返回${label}</button><span>当前对象 · 示例记录</span></div>`;
+}
+
+const viewLabels = { workbench: "运营监控", audit: "运输稽核", analytics: "生产与运力分析", ai: "AI工作台", vehicles: "车辆档案", settlement: "结算预览" };
 
 function renderMetric(label, value, unit = "") {
   return `<div class="metric"><span>${label}</span><strong>${value}<small>${unit}</small></strong></div>`;
@@ -152,6 +180,70 @@ function renderWorkbenchRow(trip) {
   `;
 }
 
+function routeSvgPoints(raw) {
+  return raw.split(" ").map((pair) => {
+    const [x, y] = pair.split(",").map(Number);
+    return `${x * 10},${y * 7}`;
+  }).join(" ");
+}
+
+function mapVehiclePosition(vehicle) {
+  if (!replayActive) return { x: vehicle.x, y: vehicle.y };
+  const index = operationsData.map.vehicles.indexOf(vehicle);
+  const route = operationsData.map.routes.find((item) => item.tripId === vehicle.tripId);
+  const points = (route?.points || "").split(" ").map((pair) => pair.split(",").map(Number));
+  if (points.length < 2) return { x: vehicle.x, y: vehicle.y };
+  const scaled = ((replayProgress + index * 0.19) % 1) * (points.length - 1);
+  const segment = Math.floor(scaled);
+  const fraction = scaled - segment;
+  const start = points[segment];
+  const end = points[Math.min(segment + 1, points.length - 1)];
+  return { x: start[0] + (end[0] - start[0]) * fraction, y: start[1] + (end[1] - start[1]) * fraction };
+}
+
+function renderMineMap() {
+  const selectedVehicle = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
+  return `
+    <section class="mine-map" aria-label="矿区模拟路线图">
+      <svg class="mine-map-svg" viewBox="0 0 1000 700" role="img" aria-label="采区、承重点、卸货点和模拟车辆路线">
+        <g class="map-contours" aria-hidden="true">
+          <path d="M20 140 C140 45 290 90 340 170 S530 260 670 170 900 75 990 130"/><path d="M-20 170 C120 75 270 120 320 200 S520 290 650 200 900 105 1020 160"/>
+          <path d="M15 560 C140 450 250 490 330 550 S530 640 650 550 880 455 990 520"/><path d="M-10 590 C120 480 240 520 310 580 S510 670 630 580 900 485 1010 550"/>
+          <path d="M500 20 C410 120 440 200 500 270 S600 430 540 520 510 630 570 700"/><path d="M530 0 C440 120 470 200 530 270 S630 430 570 520 540 630 600 700"/>
+          <path d="M90 300 C180 250 260 300 340 350 S490 390 580 330 770 280 910 350"/><path d="M70 330 C170 280 250 330 320 380 S480 420 560 360 770 310 930 380"/>
+        </g>
+        <g class="map-roads" aria-hidden="true">${operationsData.map.routes.map((route) => `<polyline class="map-route ${selectedVehicle?.tripId === route.tripId ? "selected" : ""}" points="${routeSvgPoints(route.points)}"/>`).join("")}</g>
+        <g class="map-nodes">${operationsData.map.nodes.map((node) => `<g class="map-node ${node.type === "卸货点" ? "unload" : node.type === "承重点" ? "scale" : "pit"}" transform="translate(${node.x * 10} ${node.y * 7})"><circle r="12"/><text x="17" y="4">${node.label}</text></g>`).join("")}</g>
+        <g class="map-trucks">${operationsData.map.vehicles.map((vehicle) => { const position = mapVehiclePosition(vehicle); return `<g class="map-truck ${selectedMapPlate === vehicle.plate ? "selected" : ""}" transform="translate(${position.x * 10} ${position.y * 7})" data-map-vehicle="${vehicle.plate}" tabindex="0" role="button" aria-label="查看 ${vehicle.plate} 路线"><circle class="truck-halo" r="18"/><path d="M-10 -5h12l4 5H8v6H-10zM2 -3v4h5"/><circle cx="-5" cy="7" r="2"/><circle cx="5" cy="7" r="2"/><text x="14" y="-8">${vehicle.plate}</text></g>`; }).join("")}</g>
+      </svg>
+      <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span></div>
+      <div class="map-scale">示意路线 · 不代表现场道路底图</div>
+    </section>
+  `;
+}
+
+function renderMonitorVehicle(vehicle) {
+  return `<button class="monitor-vehicle ${selectedMapPlate === vehicle.plate ? "selected" : ""}" data-map-vehicle="${vehicle.plate}"><span class="monitor-vehicle-icon">${icon("vehicles")}</span><span><strong>${vehicle.plate}</strong><small>${vehicle.tripId} · ${vehicle.status}</small></span><span class="vehicle-last-seen">${vehicle.lastLocated.slice(11)}</span></button>`;
+}
+
+function renderWorkbench() {
+  const pending = getUnresolvedTrips();
+  const open = getOpenAnomalies();
+  const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate) || operationsData.map.vehicles[0];
+  const trips = seedTrips.filter((trip) => matchesTrip(trip, searchValues.workbench, [(item) => item.id, (item) => item.plate]));
+  return `
+    ${renderPageHeader("运营监控")}
+    ${renderCustomerEntry()}
+    <div class="monitor-toolbar"><div class="range-context"><strong>示例矿区</strong><span>2026-04-01</span><span class="simulation-state"><i></i>${replayPlaying ? "回放中 · 模拟" : replayActive ? "已暂停 · 模拟" : "模拟数据"}</span></div><div class="replay-controls"><button class="icon-button" data-replay-step="-1" aria-label="上一步">‹</button><button class="button primary" data-replay-toggle>${replayPlaying ? "暂停回放" : "播放回放"}</button><button class="icon-button" data-replay-step="1" aria-label="下一步">›</button><span>13:05—14:52</span></div></div>
+    <div class="monitor-overview"><div><span>运输趟次</span><strong>${seedTrips.length}<small>趟</small></strong></div><div><span>在途车辆</span><strong>${operationsData.map.vehicles.length}<small>辆</small></strong></div><div class="alert-overview"><span>待复核线索</span><strong>${open.length}<small>项</small></strong></div><div><span>待处理趟次</span><strong>${pending.length}<small>趟</small></strong></div></div>
+    <div class="monitor-layout"><div class="monitor-map-column">${renderMineMap()}<section class="monitor-vehicle-list"><div class="section-heading"><h3>车辆态势</h3><span>位置更新时间 · 模拟</span></div>${operationsData.map.vehicles.map(renderMonitorVehicle).join("")}</section></div>
+      <aside class="monitor-rail"><div class="rail-heading"><div><span>选中车辆</span><strong>${selected.plate}</strong></div>${statusPill(getStatus(sampleTrips.get(selected.tripId)))}</div><div class="vehicle-rail-data"><div><span>当前趟次</span><button class="text-button" data-open-trip="${selected.tripId}">${selected.tripId} ›</button></div><div><span>运行状态</span><strong>${selected.status}</strong></div><div><span>计划路径</span><strong>${selected.route.join(" → ")}</strong></div><div><span>最后位置</span><strong>${selected.lastLocated}</strong></div></div><button class="button secondary rail-action" data-open-vehicle="${selected.plate}">查看车辆档案</button>
+        <div class="rail-divider"></div><div class="section-heading"><h3>AI异常线索</h3><span>${open.length} 项</span></div>${open.length ? open.map((trip) => `<button class="monitor-alert" data-open-trip="${trip.id}"><span class="alert-mark">!</span><span><strong>${trip.issue}</strong><small>${trip.id} · ${trip.plate}</small><em>${escapeHtml(eventText(trip))}</em></span><b>查看 ›</b></button>`).join("") : '<div class="empty-state">当前没有待复核线索</div>'}
+      </aside></div>
+    <div class="monitor-search">${renderSearch("workbench", "搜索车牌或趟次")}${searchValues.workbench.trim() ? `<div class="search-results-panel">${trips.map(renderWorkbenchRow).join("") || '<div class="empty-state">没有匹配记录</div>'}</div>` : ""}</div>
+  `;
+}
+
 function eventText(trip) {
   const caseReason = getFollowUp(trip)?.reason;
   if (getStatus(trip) === "confirmedAnomaly" && caseReason) return caseReason;
@@ -169,50 +261,6 @@ function renderEvent(trip, label = "示例异常") {
       <span class="event-content"><span class="event-meta">${label} · ${trip.times.unload}</span><strong>${trip.id} <small>${trip.plate}</small></strong><span>${escapeHtml(eventText(trip))}</span></span>
       <span class="event-open">查看</span>
     </button>
-  `;
-}
-
-function renderWorkbench() {
-  const pending = getUnresolvedTrips();
-  const open = getOpenAnomalies();
-  const searchedTrips = seedTrips.filter((trip) => matchesTrip(trip, searchValues.workbench, [
-    (item) => item.id,
-    (item) => item.plate,
-  ]));
-  const vehiclesCount = new Set(seedTrips.map((trip) => trip.plate)).size;
-  const dynamicEvents = eventQueue.map((id) => sampleTrips.get(id)).filter(Boolean);
-  const events = dynamicEvents.length
-    ? dynamicEvents.map((trip) => ({ trip, label: "模拟动态" }))
-    : [
-        ...open.map((trip) => ({ trip, label: "AI发现异常" })),
-        ...getOpenFollowUps().map((trip) => ({ trip, label: "待处置异常" })),
-      ];
-
-  return `
-    ${renderPageHeader("运营工作台")}
-    ${renderCustomerEntry()}
-    <div class="module-toolbar">${renderSearch("workbench", "车牌或趟次编号")}</div>
-    <section class="metrics" aria-label="运营统计">
-      ${renderMetric("运输趟次", seedTrips.length, "趟")}
-      ${renderMetric("关联车辆", vehiclesCount, "辆")}
-      ${renderMetric("待处理（含退回复核）", pending.length, "趟")}
-      ${renderMetric("核实通过净重", formatWeight(getVerifiedNetTotal()), "吨")}
-    </section>
-    ${searchValues.workbench.trim() ? `
-      <section class="search-results-panel"><div class="section-heading"><h2>检索结果</h2><span>${searchedTrips.length} 趟</span></div>${searchedTrips.length ? searchedTrips.map(renderWorkbenchRow).join("") : '<div class="empty-state">没有匹配记录</div>'}</section>
-    ` : `
-      <div class="workbench-grid">
-        <section class="workbench-panel">
-          <div class="panel-heading"><div><h2>待处理趟次</h2><span>${pending.length} 趟</span></div><button class="text-button" data-view="audit">进入稽核</button></div>
-          <div class="work-rows">${pending.length ? pending.map(renderWorkbenchRow).join("") : '<div class="empty-state">当前没有待处理趟次</div>'}</div>
-        </section>
-        <section class="workbench-panel event-panel">
-          <div class="panel-heading"><div><h2>AI异常动态</h2><span class="event-counts">待复核 ${open.length} · 待处置 ${getOpenFollowUps().length}</span></div>${customerExperience ? '<span class="customer-copy-label">体验数据</span>' : `<button class="button ${simulationRunning ? "secondary" : "primary"}" data-simulate>${simulationRunning ? "暂停模拟" : "开始模拟"}</button>`}</div>
-      <div class="event-rows">${events.length ? events.slice(0, 4).map(({ trip, label }) => renderEvent(trip, label)).join("") : '<div class="empty-state">暂无待处理异常</div>'}</div>
-          ${simulationRunning ? '<div class="simulation-note">模拟事件将关联现有示例趟次</div>' : ""}
-        </section>
-      </div>
-    `}
   `;
 }
 
@@ -406,6 +454,7 @@ function renderAuditDetail(trip) {
       ${renderAiAdvice(trip)}
       ${renderEvidence(trip)}
       ${renderReviewActions(trip)}
+      ${status === "verified" ? '<button class="text-button audit-settlement-link" data-open-settlement>查看结算预览 ›</button>' : ""}
     </section>
   `;
 }
@@ -426,6 +475,7 @@ function renderAudit() {
   if (selected) selectedTripId = selected.id;
   return `
     ${renderPageHeader("运输稽核")}
+    ${renderContextBack(detailReturnView, viewLabels[detailReturnView] || "运营监控")}
     <div class="module-toolbar">${renderSearch("audit", "车牌、趟次编号或卸货点")}</div>
     <div class="audit-layout">
       <section class="audit-list-panel"><div class="panel-heading"><div><h2>运输趟次</h2><span>${trips.length} 趟</span></div></div><div class="audit-list">${trips.length ? trips.map(renderAuditRow).join("") : '<div class="empty-state">没有匹配记录</div>'}</div></section>
@@ -513,6 +563,7 @@ function renderVehicles() {
   if (plate) selectedVehiclePlate = plate;
   return `
     ${renderPageHeader("车辆档案")}
+    ${renderContextBack(vehicleReturnView, viewLabels[vehicleReturnView] || "运营监控")}
     <div class="module-toolbar">${renderSearch("vehicles", "输入车牌号")}</div>
     <div class="vehicle-layout">
       <section class="vehicle-list-panel"><div class="panel-heading"><div><h2>运输车辆</h2><span>${matches.length} 辆</span></div></div><div class="vehicle-list">${matches.length ? matches.map((item) => `<button class="vehicle-row ${item === plate ? "selected" : ""}" data-select-vehicle="${item}"><strong>${item}</strong><span>${seedTrips.filter((trip) => trip.plate === item).length} 趟示例记录</span></button>`).join("") : '<div class="empty-state">没有匹配车辆</div>'}</div></section>
@@ -553,6 +604,7 @@ function renderSettlement() {
   if (selected) selectedTripId = selected.id;
   return `
     ${renderPageHeader("结算预览")}
+    ${renderContextBack(detailReturnView, navItems.find((item) => item.id === detailReturnView)?.label || "运输稽核")}
     <div class="module-toolbar">${renderSearch("settlement", "车牌或趟次编号")}</div>
     <div class="settlement-summary">
       <div><span>${value ? "检索结果核实通过" : "核实通过"}</span><strong>${filtered.length} <small>趟</small></strong></div>
@@ -571,12 +623,114 @@ function renderSettlement() {
   `;
 }
 
+function getPeriodRows() {
+  if (analyticsPeriod === "day") return operationsData.dailyMetrics.filter((row) => row.date === analyticsDate);
+  const count = analyticsPeriod === "week" ? 7 : operationsData.dailyMetrics.length;
+  return operationsData.dailyMetrics.slice(-count);
+}
+
+function renderPeriodTabs() {
+  return `<div class="period-tabs" role="group" aria-label="统计周期">${[["day", "日"], ["week", "周"], ["month", "月"]].map(([id, label]) => `<button class="period-tab ${analyticsPeriod === id ? "selected" : ""}" data-analytics-period="${id}" aria-pressed="${analyticsPeriod === id}">${label}</button>`).join("")}</div>`;
+}
+
+function renderTrendChart(rows) {
+  const series = [
+    { key: "minedTons", label: "采矿量", cls: "mined" },
+    { key: "verifiedTransportTons", label: "核实运输净重", cls: "transport" },
+    { key: "receivedUnloadTons", label: "卸货接收量", cls: "unload" },
+  ];
+  const max = Math.max(...rows.flatMap((row) => series.map((item) => row[item.key])), 1);
+  const chartRows = rows.length > 20 ? rows.filter((_, index) => index % 2 === 0 || index === rows.length - 1) : rows;
+  const x = (index) => chartRows.length < 2 ? 500 : 48 + index * 904 / (chartRows.length - 1);
+  const y = (value) => 206 - value / max * 174;
+  return `<div class="trend-chart"><div class="trend-legend">${series.map((item) => `<span class="${item.cls}"><i></i>${item.label}</span>`).join("")}<span class="chart-unit">吨 · 示例</span></div><svg viewBox="0 0 1000 240" role="img" aria-label="采矿量、运输净重和卸货接收量趋势"><path class="chart-gridline" d="M48 32H952M48 90H952M48 148H952M48 206H952"/><text x="8" y="36">${Math.round(max)}</text><text x="8" y="94">${Math.round(max * .67)}</text><text x="8" y="152">${Math.round(max * .33)}</text><text x="8" y="210">0</text>${series.map((item) => `<polyline class="chart-series ${item.cls}" points="${chartRows.map((row, index) => `${x(index)},${y(row[item.key])}`).join(" ")}"/>${chartRows.map((row, index) => `<circle class="chart-point ${item.cls}" cx="${x(index)}" cy="${y(row[item.key])}" r="3.5"/>`).join("")}`).join("")}${chartRows.map((row, index) => `<g class="chart-hit" data-analytics-date="${row.date}" tabindex="0" role="button" aria-label="查看 ${row.date} 来源"><circle cx="${x(index)}" cy="224" r="12"/><text x="${x(index)}" y="237">${row.date.slice(5)}</text></g>`).join("")}</svg></div>`;
+}
+
+function renderAnalytics() {
+  const rows = getPeriodRows();
+  const totals = rows.reduce((acc, row) => ({ mined: acc.mined + row.minedTons, transport: acc.transport + row.verifiedTransportTons, unload: acc.unload + row.receivedUnloadTons }), { mined: 0, transport: 0, unload: 0 });
+  const query = searchValues.analytics;
+  const displayRows = rows.filter((row) => matchesTrip(row, query, [(item) => item.date, (item) => item.miningArea, (item) => item.unloadPoint, (item) => item.minedSource, (item) => item.transportSource, (item) => item.unloadSource]));
+  const chosen = rows.find((row) => row.date === analyticsDate) || rows.at(-1);
+  const vehiclePeriodKey = analyticsPeriod === "month" ? "month" : "week";
+  const vehicleRows = operationsData.vehiclePeriods.filter((vehicle) => vehicle.periodKey === vehiclePeriodKey && matchesTrip(vehicle, query, [(item) => item.plate, (item) => item.sourceRecordId]));
+  return `
+    ${renderPageHeader("生产与运力分析")}
+    <div class="analysis-controls"><div><strong>示例矿区</strong><span>${rows[0]?.date || "—"} 至 ${rows.at(-1)?.date || "—"}</span><small>${operationsData.scopeLabel}</small></div>${renderPeriodTabs()}</div>
+    <div class="module-toolbar">${renderSearch("analytics", "搜索日期、采区、车辆或卸货点")}</div>
+    <section class="analysis-summary"><div><span>采矿量</span><strong>${totals.mined.toLocaleString()} <small>吨</small></strong><em>来源：采装计量示例</em></div><div><span>核实运输净重</span><strong>${totals.transport.toLocaleString()} <small>吨</small></strong><em>来源：人工核实趟次样例</em></div><div><span>卸货接收量</span><strong>${totals.unload.toLocaleString()} <small>吨</small></strong><em>来源：卸点接收磅单样例</em></div></section>
+    <section class="analysis-panel"><div class="panel-heading"><div><h2>生产与运输趋势</h2><span>三类计量分开统计</span></div><button class="text-button" data-view="ai">生成分析报告 ›</button></div>${renderTrendChart(rows)}</section>
+    <div class="analysis-lower"><section class="analysis-panel"><div class="panel-heading"><div><h2>采区与卸点明细</h2><span>${displayRows.length} 个日期</span></div></div><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>日期</th><th>采区</th><th>采矿量</th><th>运输净重</th><th>卸货点</th><th>接收量</th><th>来源</th></tr></thead><tbody>${displayRows.map((row) => `<tr class="${row.date === analyticsDate ? "selected" : ""}"><td><button class="table-date-button" data-analytics-date="${row.date}">${row.date}</button></td><td>${row.miningArea}</td><td>${row.minedTons} 吨</td><td>${row.verifiedTransportTons} 吨</td><td>${row.unloadPoint}</td><td>${row.receivedUnloadTons} 吨</td><td><button class="text-button" data-source-record="${row.sourceIds.mining}">示例汇总 ›</button></td></tr>`).join("")}</tbody></table></div></section>
+      <section class="analysis-panel vehicle-capacity-panel"><div class="panel-heading"><div><h2>车辆周期运力</h2><span>${vehicleRows[0]?.periodLabel || "扩展示例"} · 无利用率推算</span></div></div><div class="capacity-table-head"><span>车辆</span><span>有效趟次</span><span>核实吨位</span><span>均载重</span><span>周转</span></div>${vehicleRows.map((vehicle) => `<div class="capacity-item"><button class="capacity-row" data-open-vehicle="${vehicle.plate}"><strong>${vehicle.plate}</strong><span>${vehicle.trips}</span><span>${vehicle.verifiedTons.toFixed(1)} 吨</span><span>${vehicle.averagePayload.toFixed(2)} 吨</span><span>${vehicle.turnaroundMinutes} 分</span></button><button class="capacity-source" data-source-record="${vehicle.sourceRecordId}">来源</button></div>`).join("")}</section></div>
+    <aside class="source-detail"><div><strong>${chosen?.date || "—"} · ${chosen?.miningArea || "示例范围"}</strong><span>采矿量 ${chosen?.minedTons ?? "—"} 吨 · ${chosen?.sourceIds.mining || "—"}</span><span>运输净重 ${chosen?.verifiedTransportTons ?? "—"} 吨 · ${chosen?.sourceIds.transport || "—"}</span><span>卸货接收 ${chosen?.receivedUnloadTons ?? "—"} 吨 · ${chosen?.sourceIds.unload || "—"}</span><span>汇总样例来源不等同原始磅单；关联趟次需单独查看。</span></div><div class="source-actions"><button class="text-button" data-source-record="${chosen?.sourceIds.mining}">采矿汇总来源 ›</button><button class="text-button" data-source-record="${chosen?.sourceIds.transport}">运输汇总来源 ›</button><button class="text-button" data-source-record="${chosen?.sourceIds.unload}">卸货汇总来源 ›</button>${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}</div></aside>
+  `;
+}
+
+function renderSourceButtons(ids) {
+  return ids.map((id) => `<button class="source-link" data-open-source-trip="${id}">${id} ›</button>`).join("");
+}
+
+function renderMetricSourceButtons(ids = []) {
+  return `${ids.slice(0, 3).map((id) => `<button class="source-link" data-source-record="${id}">${id} · 示例汇总 ›</button>`).join("")}${ids.length > 3 ? `<span class="source-count">另有 ${ids.length - 3} 条日汇总</span>` : ""}`;
+}
+
+function renderSourceRecord(id) {
+  const record = operationsData.sourceRecords.find((item) => item.id === id);
+  if (!record) return "";
+  return `<aside class="source-record-detail"><div><span>示例汇总来源</span><strong>${record.id}</strong></div><p>${record.date} · ${record.metric} ${record.value.toLocaleString()} ${record.unit}</p><small>${record.source} · ${record.scope}</small></aside>`;
+}
+
+function renderChatAnswer(item) {
+  if (!item) return "";
+  let answer = item.answer;
+  let metricResult = "";
+  if (item.intent === "daily-operation") {
+    const verified = getVerifiedTrips();
+    const pending = getUnresolvedTrips();
+    const total = verified.reduce((sum, trip) => sum + getNetWeight(trip), 0);
+    answer = `示例范围内有 ${seedTrips.length} 趟运输记录，${verified.length} 趟人工核实通过，${pending.length} 趟待复核；只有核实通过记录计入结算预览。卸货接收量来自独立示例卸点磅单。`;
+    metricResult = `<div class="answer-metrics"><div><span>运输趟次</span><strong>${seedTrips.length} 趟</strong></div><div><span>核实通过净重</span><strong>${formatWeight(total)} 吨</strong></div><div><span>待复核</span><strong>${pending.length} 趟</strong></div></div>`;
+  } else if (item.intent === "vehicle-capacity" || item.intent === "vehicle-month-capacity") {
+    const vehicle = operationsData.vehiclePeriods.find((record) => record.plate === "晋B·24680" && record.periodKey === (item.intent === "vehicle-month-capacity" ? "month" : "week"));
+    metricResult = `<div class="answer-metrics"><div><span>有效趟次 · 扩展示例</span><strong>${vehicle.trips} 趟</strong></div><div><span>核实净重</span><strong>${vehicle.verifiedTons.toFixed(1)} 吨</strong></div><div><span>均载 / 周转</span><strong>${vehicle.averagePayload.toFixed(2)} 吨 · ${vehicle.turnaroundMinutes} 分</strong></div></div>`;
+  } else if (item.intent === "production-trend" || item.intent === "unload-trend") {
+    const totals = operationsData.dailyMetrics.reduce((sum, row) => ({ mined: sum.mined + row.minedTons, transport: sum.transport + row.verifiedTransportTons, unload: sum.unload + row.receivedUnloadTons }), { mined: 0, transport: 0, unload: 0 });
+    metricResult = `<div class="answer-metrics"><div><span>采矿量</span><strong>${totals.mined.toLocaleString()} 吨</strong></div><div><span>核实运输净重</span><strong>${totals.transport.toLocaleString()} 吨</strong></div><div><span>卸货接收量</span><strong>${totals.unload.toLocaleString()} 吨</strong></div></div>`;
+    answer = `28天扩展示例分别汇总为采矿量 ${totals.mined.toLocaleString()} 吨、核实运输净重 ${totals.transport.toLocaleString()} 吨、卸货接收量 ${totals.unload.toLocaleString()} 吨。三个口径来自独立示例来源，不能直接互相替代。`;
+  } else if (item.intent === "anomaly-review") {
+    answer = `当前有 ${getOpenAnomalies().length} 条AI异常线索待人工复核。线索只用于核对路线、卸货记录、影像和称重历史，不等于作弊结论。`;
+  }
+  return `<article class="chat-answer"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>查询结果</strong><small>${item.period}</small></div></div><p>${escapeHtml(answer)}</p>${metricResult}<div class="answer-scope"><div><span>查询范围</span><strong>${item.period}</strong></div><div><span>指标口径</span><strong>${item.metric}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${source}</small>`).join("")}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}<div class="answer-actions"><button class="button primary" data-generate-report>生成报告</button><span>示例查询 · 仅供业务验证</span></div></article>`;
+}
+
+function renderFilePreview() {
+  if (!pendingUpload) return "";
+  return `<section class="file-preview"><div class="panel-heading"><div><h2>解析预览</h2><span>${escapeHtml(pendingUpload.name)} · ${pendingUpload.type}</span></div><button class="text-button" data-cancel-upload>取消</button></div><small class="file-source-ref">来源位置：${escapeHtml(pendingUpload.sourceRef)}</small><p>${escapeHtml(pendingUpload.excerpt || "文件内容为空")}</p>${pendingUpload.rows ? `<div class="file-table">${pendingUpload.rows.map(({ lineNo, cells }) => `<div><span class="file-row-number">${lineNo}</span>${cells.map((cell) => `<span>${escapeHtml(cell)}</span>`).join("")}</div>`).join("")}</div>` : ""}<div class="file-boundary">文件来源独立保存，不加入平台运营统计</div><button class="button primary" data-confirm-upload>确认整理为文件报告</button></section>`;
+}
+
+function renderAiWorkbench() {
+  const item = selectedChat ? operationsData.chatExamples.find((example) => example.intent === selectedChat) : null;
+  return `
+    ${renderPageHeader("AI工作台")}
+    <div class="ai-workspace"><section class="chat-column"><div class="chat-heading"><div><h2>矿山运营问答</h2><span>结果附指标口径与来源记录</span></div><span class="ai-status"><i></i>示例数据</span></div>
+      <div class="chat-prompts">${operationsData.chatExamples.map((example) => `<button class="prompt-button ${selectedChat === example.intent ? "selected" : ""}" data-chat-example="${example.intent}">${example.question}<span>→</span></button>`).join("")}</div>
+      ${chatQuestion ? `<div class="user-question">${escapeHtml(chatQuestion)}</div>` : ""}${renderChatAnswer(item)}${chatQuestion && !item ? `<div class="chat-answer"><p>当前演示支持运输汇总、车辆运力、采矿趋势、卸货接收和异常查询。请选择一个示例问题查看来源化结果。</p></div>` : ""}
+      <form class="chat-composer" data-chat-form><input name="question" value="${escapeHtml(chatQuestion)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="button primary" type="submit">查询</button></form>
+      <div class="report-list"><div class="section-heading"><h3>已生成报告</h3><span>${reports.length} 份</span></div>${reports.length ? reports.map((report, index) => `<div class="report-row"><span><strong>${escapeHtml(report.title)}</strong><small>${report.createdAt} · ${report.origin}</small></span><button class="text-button" data-download-report="${index}">下载 .md</button></div>`).join("") : '<div class="empty-state compact">还没有生成报告</div>'}</div>
+    </section><aside class="file-column"><div class="file-column-heading"><h2>文件报告</h2><span>解析后由你确认</span></div><label class="upload-button"><input type="file" data-file-upload accept=".csv,.txt,.md,text/csv,text/plain,text/markdown"/><span>＋ 上传 CSV / TXT / MD</span></label>${renderFilePreview()}<div class="uploaded-list">${fileReports.length ? fileReports.map((report, index) => `<div class="uploaded-row"><strong>${escapeHtml(report.name)}</strong><small>文件来源 · 已确认</small><button class="text-button" data-download-file-report="${index}">查看报告</button></div>`).join("") : '<div class="file-empty">支持 CSV、TXT、MD；内容预览和确认后才整理报告。</div>'}</div></aside></div>
+  `;
+}
+
 function renderLightbox() {
   return `<div class="lightbox" data-lightbox hidden role="dialog" aria-modal="true" aria-label="示例车辆影像"><button class="lightbox-close" data-close-photo aria-label="关闭影像">×</button><img data-lightbox-image alt="完整示例车辆影像" /></div>`;
 }
 
 function renderToast() {
   return notice ? `<div class="toast" role="status">${notice}</div>` : "";
+}
+
+function renderGlobalBar() {
+  return `<header class="app-topbar"><div><span class="global-site-dot"></span><strong>示例矿区</strong><span class="global-divider">/</span><span>2026-04-01</span></div><span class="global-data-state">${operationsData.scopeLabel}</span></header>`;
 }
 
 function createCustomerExperience() {
@@ -632,11 +786,14 @@ function render(root, focusSearch = null) {
     audit: renderAudit,
     vehicles: renderVehicles,
     settlement: renderSettlement,
+    analytics: renderAnalytics,
+    ai: renderAiWorkbench,
   };
   root.innerHTML = `
     <div class="app-shell">
       ${renderNav()}
       <main class="main-content" data-page="${activeView}">
+        ${renderGlobalBar()}
         ${customerExperience ? '<div class="customer-mode-banner"><span>客户能力验收体验 · 本地模拟数据</span><span><button class="text-button" data-return-customer>返回验收路径</button><button class="text-button" data-exit-customer>退出体验</button></span></div>' : ""}
         ${pages[activeView]()}
       </main>
@@ -652,6 +809,12 @@ function render(root, focusSearch = null) {
 }
 
 function openAuditTrip(root, tripId) {
+  if (activeView === "vehicles") {
+    detailReturnView = "vehicles";
+  } else if (activeView !== "audit" && activeView !== "settlement") {
+    detailReturnView = activeView;
+    vehicleReturnView = activeView;
+  }
   selectedTripId = tripId;
   markCustomerVisited("evidence");
   activeView = "audit";
@@ -661,6 +824,15 @@ function openAuditTrip(root, tripId) {
 }
 
 function selectView(root, view) {
+  if (view !== "audit" && view !== "vehicles" && view !== "settlement") {
+    detailReturnView = view;
+    vehicleReturnView = view;
+  }
+  if (view !== "workbench" && replayPlaying) {
+    replayPlaying = false;
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
   activeView = view;
   markCustomerVisited({ workbench: "discovery", audit: "evidence", vehicles: "archive", settlement: "settlement" }[view]);
   notice = "";
@@ -714,6 +886,21 @@ function handleReview(root, tripId, action) {
 }
 
 function handleWorkflowSubmit(root, event) {
+  if (event.target.matches("[data-chat-form]")) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target).entries());
+    chatQuestion = String(values.question || "").trim();
+    const query = chatQuestion.toLocaleLowerCase();
+    const intent = query.includes("报告") ? "report"
+      : (query.includes("车") || query.includes("运力") || query.includes("周转")) ? (query.includes("月") ? "vehicle-month-capacity" : "vehicle-capacity")
+      : query.includes("采矿") || query.includes("采区") || query.includes("采出") ? "production-trend"
+        : query.includes("卸") || query.includes("接收") ? "unload-trend"
+          : query.includes("异常") || query.includes("稽核") ? "anomaly-review"
+            : query.includes("今天") || query.includes("运输") || query.includes("趟") ? "daily-operation" : null;
+    selectedChat = intent;
+    render(root);
+    return;
+  }
   const form = event.target.closest("[data-workflow-form]");
   if (!form) return;
   event.preventDefault();
@@ -759,6 +946,15 @@ function handleCaseAction(root, tripId, action) {
   render(root);
 }
 
+function downloadText(filename, content) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function handleClick(root, event) {
   if (event.target.closest("[data-enter-customer]")) {
     enterCustomerExperience(root);
@@ -793,6 +989,128 @@ function handleClick(root, event) {
     markCustomerVisited(customerTrip.dataset.customerStage);
     selectedTripId = customerTrip.dataset.customerTrip;
     openAuditTrip(root, selectedTripId);
+    return;
+  }
+  const mapVehicle = event.target.closest("[data-map-vehicle]");
+  if (mapVehicle) {
+    selectedMapPlate = mapVehicle.dataset.mapVehicle;
+    render(root);
+    return;
+  }
+  const period = event.target.closest("[data-analytics-period]");
+  if (period) {
+    analyticsPeriod = period.dataset.analyticsPeriod;
+    const rows = getPeriodRows();
+    analyticsDate = rows.at(-1)?.date || analyticsDate;
+    render(root);
+    return;
+  }
+  const sourceTrip = event.target.closest("[data-open-source-trip]");
+  if (sourceTrip) {
+    openAuditTrip(root, sourceTrip.dataset.openSourceTrip);
+    return;
+  }
+  const sourceRecord = event.target.closest("[data-source-record]");
+  if (sourceRecord) {
+    selectedSourceId = sourceRecord.dataset.sourceRecord;
+    render(root);
+    return;
+  }
+  const chartDate = event.target.closest("[data-analytics-date]");
+  if (chartDate) {
+    analyticsDate = chartDate.dataset.analyticsDate;
+    render(root);
+    return;
+  }
+  const prompt = event.target.closest("[data-chat-example]");
+  if (prompt) {
+    const item = operationsData.chatExamples.find((example) => example.intent === prompt.dataset.chatExample);
+    selectedChat = item?.intent || null;
+    chatQuestion = item?.question || "";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-generate-report]")) {
+    const item = operationsData.chatExamples.find((example) => example.intent === selectedChat);
+    if (item) {
+      reports.unshift({ title: `${item.period} ${item.metric}报告`, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }), origin: "平台示例数据", content: `# ${item.metric}报告\n\n范围：${item.period}\n\n口径：${item.metric}\n\n${item.answer}\n\n来源：${item.sources.join("；")}\n\n汇总来源：${(item.sourceRecordIds || []).join("、") || "无"}\n\n关联趟次：${(item.sourceTripIds || []).join("、") || "无"}` });
+      notice = "报告已生成，可下载 Markdown 文件";
+    }
+    render(root);
+    return;
+  }
+  const downloadReport = event.target.closest("[data-download-report]");
+  if (downloadReport) {
+    const report = reports[Number(downloadReport.dataset.downloadReport)];
+    if (report) downloadText(`${report.title}.md`, report.content);
+    return;
+  }
+  const downloadFile = event.target.closest("[data-download-file-report]");
+  if (downloadFile) {
+    const report = fileReports[Number(downloadFile.dataset.downloadFileReport)];
+    if (report) downloadText(`${report.name}-整理报告.md`, report.content);
+    return;
+  }
+  if (event.target.closest("[data-confirm-upload]")) {
+    if (pendingUpload) {
+      fileReports.unshift({ ...pendingUpload, content: `# 文件整理报告\n\n文件：${pendingUpload.name}\n\n来源：用户上传文件，独立于平台运营统计\n\n## 内容摘要\n\n${pendingUpload.excerpt}\n\n## 来源记录\n\n${pendingUpload.type} 文件 · ${pendingUpload.sourceRef}` });
+      notice = "文件来源报告已整理，未并入平台统计";
+      pendingUpload = null;
+    }
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-cancel-upload]")) {
+    pendingUpload = null;
+    render(root);
+    return;
+  }
+  const back = event.target.closest("[data-back-context]");
+  if (back) {
+    activeView = back.dataset.backContext;
+    render(root);
+    return;
+  }
+  const openVehicle = event.target.closest("[data-open-vehicle]");
+  if (openVehicle) {
+    vehicleReturnView = activeView === "vehicles" ? vehicleReturnView : activeView;
+    selectedVehiclePlate = openVehicle.dataset.openVehicle;
+    activeView = "vehicles";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-replay-toggle]")) {
+    replayPlaying = !replayPlaying;
+    replayActive = true;
+    clearInterval(replayTimer);
+    replayTimer = replayPlaying ? setInterval(() => {
+      if (activeView !== "workbench") {
+        replayPlaying = false;
+        clearInterval(replayTimer);
+        replayTimer = null;
+        return;
+      }
+      replayProgress = (replayProgress + 0.025) % 1;
+      render(root);
+    }, 500) : null;
+    notice = replayPlaying ? "已开始模拟路线回放" : "模拟回放已暂停";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-open-settlement]")) {
+    detailReturnView = "audit";
+    activeView = "settlement";
+    render(root);
+    return;
+  }
+  const replayStep = event.target.closest("[data-replay-step]");
+  if (replayStep) {
+    const vehicles = operationsData.map.vehicles;
+    replayActive = true;
+    replayProgress = (replayProgress + Number(replayStep.dataset.replayStep) * 0.08 + 1) % 1;
+    replayCursor = (replayCursor + Number(replayStep.dataset.replayStep) + vehicles.length) % vehicles.length;
+    selectedMapPlate = vehicles[replayCursor].plate;
+    render(root);
     return;
   }
   const viewButton = event.target.closest("[data-view]");
@@ -862,6 +1180,33 @@ function handleClick(root, event) {
 function renderApp(root) {
   root.addEventListener("click", (event) => handleClick(root, event));
   root.addEventListener("submit", (event) => handleWorkflowSubmit(root, event));
+  root.addEventListener("change", async (event) => {
+    const input = event.target.closest("[data-file-upload]");
+    const file = input?.files?.[0];
+    if (!file) return;
+    const extension = `.${file.name.split(".").at(-1).toLocaleLowerCase()}`;
+    if (!operationsData.supportedFileTypes.includes(extension)) {
+      notice = "当前支持 CSV、TXT、MD 文件";
+      render(root);
+      return;
+    }
+    const text = await file.text();
+    let lines = text.split(/\r?\n/).map((line, index) => ({ lineNo: index + 1, line })).filter((item) => item.line.trim());
+    let rows = null;
+    if (extension === ".csv") {
+      try {
+        rows = parseDemoCsv(text).slice(0, 7).map((row) => ({ lineNo: row.lineNo, cells: row.cells.slice(0, 6) }));
+        lines = rows.map(({ lineNo, cells }) => ({ lineNo, line: cells.join(" · ") }));
+      } catch (error) {
+        notice = error.message;
+        render(root);
+        return;
+      }
+    }
+    const previewLines = lines.slice(0, 12);
+    pendingUpload = { name: file.name, type: extension.toUpperCase().slice(1), excerpt: extension === ".csv" ? "CSV表格预览见下方" : previewLines.map((item) => `${item.lineNo}: ${item.line}`).join("\n").slice(0, 1200), sourceRef: extension === ".csv" ? `第${rows[0]?.lineNo ?? 1}–${rows.at(-1)?.lineNo ?? 1}行（含表头）` : `第${previewLines[0]?.lineNo ?? 1}–${previewLines.at(-1)?.lineNo ?? 1}行`, rows };
+    render(root);
+  });
   root.addEventListener("input", (event) => {
     const input = event.target.closest("[data-search-for]");
     if (!input) return;
@@ -871,6 +1216,20 @@ function renderApp(root) {
     render(root, { view, caret });
   });
   root.addEventListener("keydown", (event) => {
+    const mapVehicle = event.target.closest("[data-map-vehicle]");
+    if (mapVehicle && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      selectedMapPlate = mapVehicle.dataset.mapVehicle;
+      render(root);
+      return;
+    }
+    const chartDate = event.target.closest("[data-analytics-date]");
+    if (chartDate && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      analyticsDate = chartDate.dataset.analyticsDate;
+      render(root);
+      return;
+    }
     if (event.key === "Escape") {
       const lightbox = root.querySelector("[data-lightbox]");
       if (lightbox && !lightbox.hidden) {
