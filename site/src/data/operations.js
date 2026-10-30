@@ -73,6 +73,17 @@ function parseDemoCsv(text) {
   return rows;
 }
 
+function buildDemoFileReport(file) {
+  const rows = file.rows?.length
+    ? [
+        ["行号", ...file.rows[0].cells],
+        ["---", ...file.rows[0].cells.map(() => "---")],
+        ...file.rows.map(({ lineNo, cells }) => [lineNo, ...cells]),
+      ].map((row) => `| ${row.map((cell) => String(cell).replaceAll("|", "\\|").replaceAll("\n", "<br>")).join(" | ")} |`).join("\n")
+    : file.excerpt || "文件内容为空";
+  return `# 文件整理报告\n\n文件：${file.name}\n\n来源：用户上传文件，独立于平台运营统计\n\n## 内容预览\n\n${rows}\n\n## 来源记录\n\n${file.type} 文件 · ${file.sourceRef}`;
+}
+
 window.operationsDemoData = {
   scopeLabel: "模拟回放 · 多周期示例数据",
   supportedFileTypes: [".csv", ".txt", ".md"],
@@ -114,3 +125,4 @@ window.operationsDemoData = {
   ],
 };
 window.parseDemoCsv = parseDemoCsv;
+window.buildDemoFileReport = buildDemoFileReport;
