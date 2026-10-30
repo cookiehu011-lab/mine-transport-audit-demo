@@ -208,7 +208,7 @@ function mapCoordinate(point) {
 }
 
 function truckMapIcon(selected) {
-  const color = selected ? "#0bb7c6" : "#22384c";
+  const color = selected ? "#0bb7c6" : "#c77d36";
   return L.divIcon({
     className: "map-truck-marker",
     html: `<span class="map-truck-symbol ${selected ? "selected" : ""}"><svg viewBox="0 0 32 24" aria-hidden="true"><path d="M2 4h18v13H2zM20 8h6l4 5v4h-10z" fill="${color}"/><path d="M21 9h4l3 4h-7z" fill="#d9f8fa"/><circle cx="8" cy="19" r="3"/><circle cx="24" cy="19" r="3"/></svg></span>`,
@@ -289,7 +289,6 @@ function renderMineMap() {
   return `
     <section class="mine-map" aria-label="矿区模拟路线图">
       <div id="mine-map-canvas" class="mine-map-canvas" role="application" aria-label="交互式矿山地图，车辆和路线均为模拟数据"></div>
-      <div class="map-layer-label">示例矿区 · 模拟坐标</div>
       <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span></div>
       <div class="map-scale">${operationsData.map.locationLabel} · 示意路线 · 非现场 GPS</div>
     </section>
@@ -990,7 +989,7 @@ function handleWorkflowSubmit(root, event) {
     const values = Object.fromEntries(new FormData(event.target).entries());
     chatQuestion = String(values.question || "").trim();
     const query = chatQuestion.toLocaleLowerCase();
-    const intent = query.includes("报告") ? "report"
+    const intent = query.includes("生成") && query.includes("报告") ? "report"
       : (query.includes("车") || query.includes("运力") || query.includes("周转")) ? (query.includes("月") ? "vehicle-month-capacity" : "vehicle-capacity")
       : query.includes("采矿") || query.includes("采区") || query.includes("采出") ? "production-trend"
         : query.includes("卸") || query.includes("接收") ? "unload-trend"
