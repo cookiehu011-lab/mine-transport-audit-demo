@@ -91,6 +91,9 @@ window.operationsDemoData = {
   dailyMetrics,
   sourceRecords,
   map: {
+    locationLabel: "示例坐标 · 不代表矿区实际位置",
+    center: [39.72, 109.83],
+    zoom: 12,
     nodes: [
       { id: "pit-west", label: "西采区", type: "采区", x: 18, y: 30 },
       { id: "pit-east", label: "东采区", type: "采区", x: 73, y: 23 },
@@ -115,13 +118,13 @@ window.operationsDemoData = {
   },
   vehiclePeriods,
   chatExamples: [
-    { intent: "daily-operation", question: "今天运输和卸货情况怎么样？", answer: "当前样例范围内有 8 趟运输记录，其中 5 趟人工核实通过，核实净重 107.70 吨；3 趟仍待复核，暂不计入结算预览。卸货接收量来自独立的示例卸点磅单口径。", period: "2026-04-01 · 示例矿区", metric: "趟次状态 / 核实运输净重 / 卸货接收量", sources: ["运输趟次台账 · 8条", "人工复核状态 · 会话演示数据"], sourceTripIds: ["T-0401-001", "T-0401-002", "T-0401-003", "T-0401-007"], sourceRecordIds: ["MINE-2026-04-01", "TRANS-2026-04-01", "UNLOAD-2026-04-01"] },
-    { intent: "vehicle-capacity", question: "晋B·24680 近一周运力如何？", answer: "扩展示例中该车近一周有效趟次 44 趟，核实运输净重 965.30 吨，平均载重 21.94 吨，平均周转 54 分钟。现有样例没有额定载荷和可运营时长，不能计算利用率。", period: "2026-03-26 至 2026-04-01 · 周", metric: "有效趟数 / 核实净重 / 平均载重 / 周转时长", sources: ["车辆周期运力汇总 · 扩展示例"], sourceRecordIds: ["VEHICLE-W14-24680"] },
-    { intent: "vehicle-month-capacity", question: "晋B·24680 本月运力如何？", answer: "扩展示例中该车本月有效趟次 176 趟、核实运输净重 3,861.2 吨，平均载重 21.94 吨，平均周转 56 分钟。现有样例没有额定载荷和可运营时长，不能计算利用率。", period: "2026-04-01 至 2026-04-28 · 月", metric: "有效趟数 / 核实净重 / 平均载重 / 周转时长", sources: ["车辆周期运力汇总 · 扩展示例"], sourceRecordIds: ["VEHICLE-APR-24680"] },
-    { intent: "production-trend", question: "本月各采区采矿量趋势如何？", answer: "本月采区采装计量按独立示例记录汇总。采矿量来源为采装作业计量，不以运输净重替代；点选日期可查看对应来源范围。", period: "2026-04-01 至 2026-04-28 · 月", metric: "采区采装计量 · 示例吨", sources: ["采装计量日汇总 · 28条扩展示例"], sourceRecordIds: dailyMetrics.map((row) => row.sourceIds.mining) },
-    { intent: "unload-trend", question: "各卸点每天接收量是多少？", answer: "卸货接收量按卸点接收磅单示例单独统计。与核实运输净重的差异可能涉及水分、残料、计量时点或关联缺失；当前演示不据差值直接判断损耗。", period: "2026-04-01 至 2026-04-28 · 月", metric: "卸点接收磅单 · 示例吨", sources: ["卸点接收日汇总 · 28条扩展示例"], sourceRecordIds: dailyMetrics.map((row) => row.sourceIds.unload) },
-    { intent: "anomaly-review", question: "AI发现的异常有哪些？", answer: "当前有路线卸点不一致和皮重波动两类待复核线索。它们只提示人工核对计划、卸货记录、影像和称重历史，不等于作弊结论。", period: "2026-04-01 · 当前演示会话", metric: "待复核线索 · 人工状态优先", sources: ["路线与卸货记录对照", "车辆皮重历史记录", "运输称重与示例影像"], sourceTripIds: ["T-0401-001", "T-0401-003", "T-0401-007"] },
-    { intent: "report", question: "生成上周车辆运力与卸货趋势报告。", answer: "报告将分列车辆有效趟次、核实运输净重、平均载重、周转时长及卸点接收趋势，并附指标口径和关联来源。", period: "2026-03-26 至 2026-04-01 · 周", metric: "车辆周期运力 / 卸点接收", sources: ["车辆运力与卸点接收 · 扩展示例汇总"], sourceRecordIds: ["VEHICLE-W14-24680", "UNLOAD-2026-04-01"] },
+    { intent: "daily-operation", resultType: "operation-summary", primaryAction: "open-audit", question: "今天运输和卸货情况怎么样？", answer: "当前样例范围内有 8 趟运输记录，其中 5 趟人工核实通过，核实净重 107.70 吨；3 趟仍待复核，暂不计入结算预览。卸货接收量来自独立的示例卸点磅单口径。", period: "2026-04-01 · 示例矿区", metric: "趟次状态 / 核实运输净重 / 卸货接收量", sources: ["运输趟次台账 · 8条", "人工复核状态 · 会话演示数据"], sourceTripIds: ["T-0401-001", "T-0401-002", "T-0401-003", "T-0401-007"], sourceRecordIds: ["MINE-2026-04-01", "TRANS-2026-04-01", "UNLOAD-2026-04-01"] },
+    { intent: "vehicle-capacity", resultType: "vehicle-capacity", primaryAction: "open-vehicle", question: "晋B·24680 近一周运力如何？", answer: "扩展示例中该车近一周有效趟次 44 趟，核实运输净重 965.30 吨，平均载重 21.94 吨，平均周转 54 分钟。现有样例没有额定载荷和可运营时长，不能计算利用率。", period: "2026-03-26 至 2026-04-01 · 周", metric: "有效趟数 / 核实净重 / 平均载重 / 周转时长", sources: ["车辆周期运力汇总 · 扩展示例"], sourceRecordIds: ["VEHICLE-W14-24680"], plate: "晋B·24680" },
+    { intent: "vehicle-month-capacity", resultType: "vehicle-capacity", primaryAction: "open-vehicle", question: "晋B·24680 本月运力如何？", answer: "扩展示例中该车本月有效趟次 176 趟、核实运输净重 3,861.2 吨，平均载重 21.94 吨，平均周转 56 分钟。现有样例没有额定载荷和可运营时长，不能计算利用率。", period: "2026-04-01 至 2026-04-28 · 月", metric: "有效趟数 / 核实净重 / 平均载重 / 周转时长", sources: ["车辆周期运力汇总 · 扩展示例"], sourceRecordIds: ["VEHICLE-APR-24680"], plate: "晋B·24680" },
+    { intent: "production-trend", resultType: "production-trend", primaryAction: "open-source", question: "本月各采区采矿量趋势如何？", answer: "本月采区采装计量按独立示例记录汇总。采矿量来源为采装作业计量，不以运输净重替代；点选日期可查看对应来源范围。", period: "2026-04-01 至 2026-04-28 · 月", metric: "采区采装计量 · 示例吨", sources: ["采装计量日汇总 · 28条扩展示例"], sourceRecordIds: dailyMetrics.map((row) => row.sourceIds.mining) },
+    { intent: "unload-trend", resultType: "unload-trend", primaryAction: "open-source", question: "各卸点每天接收量是多少？", answer: "卸货接收量按卸点接收磅单示例单独统计。与核实运输净重的差异可能涉及水分、残料、计量时点或关联缺失；当前演示不据差值直接判断损耗。", period: "2026-04-01 至 2026-04-28 · 月", metric: "卸点接收磅单 · 示例吨", sources: ["卸点接收日汇总 · 28条扩展示例"], sourceRecordIds: dailyMetrics.map((row) => row.sourceIds.unload) },
+    { intent: "anomaly-review", resultType: "anomaly-list", primaryAction: "open-audit", question: "AI发现的异常有哪些？", answer: "当前有路线卸点不一致和皮重波动两类待复核线索。它们只提示人工核对计划、卸货记录、影像和称重历史，不等于作弊结论。", period: "2026-04-01 · 当前演示会话", metric: "待复核线索 · 人工状态优先", sources: ["路线与卸货记录对照", "车辆皮重历史记录", "运输称重与示例影像"], sourceTripIds: ["T-0401-001", "T-0401-003", "T-0401-007"] },
+    { intent: "report", resultType: "report-preview", primaryAction: "generate-report", question: "生成上周车辆运力与卸货趋势报告。", answer: "报告将分列车辆有效趟次、核实运输净重、平均载重、周转时长及卸点接收趋势，并附指标口径和关联来源。", period: "2026-03-26 至 2026-04-01 · 周", metric: "车辆周期运力 / 卸点接收", sources: ["车辆运力与卸点接收 · 扩展示例汇总"], sourceRecordIds: ["VEHICLE-W14-24680", "UNLOAD-2026-04-01"] },
   ],
 };
 window.parseDemoCsv = parseDemoCsv;
