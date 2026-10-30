@@ -856,7 +856,8 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
   .answer-metrics { grid-template-columns: 1fr; }
   .answer-metrics > div + div { border-top: 1px solid #e8edf1; border-left: 0; }
 }
-.sidebar-user { margin-top: auto; }
+.sidebar { display: grid; grid-template-rows: auto 1fr auto; }
+.sidebar-user { min-height: 72px; padding: 12px 15px; border-top: 1px solid #273548; }
 .app-topbar { gap: 14px; }
 .global-context { min-width: 0; flex: 1; flex-wrap: nowrap; }
 .global-context > strong, .global-context .topbar-select, .topbar-actions, .operator-name { flex: 0 0 auto; white-space: nowrap; }
