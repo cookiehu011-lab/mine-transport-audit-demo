@@ -27,14 +27,19 @@ let customerExperience = null;
 const plates = [...new Set(seedTrips.map((trip) => trip.plate))];
 const searchValues = { workbench: "", audit: "", vehicles: "", settlement: "", analytics: "" };
 const eventQueue = [];
-let selectedMapPlate = operationsData.map.vehicles[0].plate;
+let selectedMapPlate = null;
 let analyticsPeriod = "week";
 let analyticsDate = operationsData.dailyMetrics.at(-1).date;
-let selectedChat = "production-trend";
-let aiContentTab = "reports";
+let selectedChat = null;
+let aiDockView = "hidden";
 let auditFilter = "all";
 let chatQuestion = "";
+let chatDraft = "";
 let chatAnswer = null;
+let chatState = "complete";
+let chatStreamText = "";
+let chatStreamTimer = null;
+let chatQueryId = 0;
 let reports = [];
 let pendingUpload = null;
 let fileReports = [];
@@ -43,9 +48,12 @@ let vehicleReturnView = "workbench";
 let detailReturnView = "workbench";
 let replayPlaying = false;
 let replayActive = false;
-let replayCursor = 0;
 let replayProgress = 0;
 let replayTimer = null;
+let monitorModalOpen = false;
+let monitorMode = "live";
+let monitorReplay = null;
+let reportPreview = null;
 
 let activeView = "workbench";
 let selectedTripId = "T-0401-007";
@@ -61,6 +69,7 @@ let notice = "";
 let workflowForm = null;
 
 const formatWeight = (value) => Number(value).toFixed(2);
+const timeToMinutes = (value) => value.split(":").map(Number).reduce((hours, part) => hours * 60 + part);
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const getReviewStatuses = () => customerExperience?.reviewStatuses ?? reviewStatuses;
 const getFollowUpCases = () => customerExperience?.followUpCases ?? followUpCases;
@@ -84,6 +93,8 @@ const iconPaths = {
   settlement: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   analytics: '<path d="M4 19V5M4 19h17M8 15l4-4 3 2 5-6"/><circle cx="8" cy="15" r="1"/><circle cx="12" cy="11" r="1"/><circle cx="15" cy="13" r="1"/>',
   ai: '<path d="M12 3v3M5.6 5.6l2.1 2.1M3 12h3M5.6 18.4l2.1-2.1M12 18v3M18.4 18.4l-2.1-2.1M18 12h3M18.4 5.6l-2.1 2.1"/><circle cx="12" cy="12" r="4"/>',
+  location: '<path d="M20 10.2c0 5.1-8 11-8 11s-8-5.9-8-11a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.4"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 9.5h17"/>',
 };
 
 function icon(name) {
@@ -93,7 +104,7 @@ function icon(name) {
 function renderNav() {
   const currentView = activeView === "vehicles" ? vehicleReturnView : activeView === "settlement" ? detailReturnView : activeView;
   return `
-    <aside class="sidebar">
+    <header class="platform-nav-shell">
       <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 28"><path d="M2 23 13 7l7 9 5-7 13 14H2Z"/></svg></span><span>矿山运营平台</span></div>
       <nav aria-label="主导航">
         ${navItems.map((item) => `
@@ -103,8 +114,7 @@ function renderNav() {
           </button>
         `).join("")}
       </nav>
-      <div class="sidebar-user"><span>张</span><div><strong>张工</strong><small>矿区运营负责人</small></div><b>⌄</b></div>
-    </aside>
+    </header>
   `;
 }
 
@@ -207,8 +217,37 @@ function mapCoordinate(point) {
   return [centerLat + (50 - point.y) * 0.00055, centerLng + (point.x - 50) * 0.0007];
 }
 
+function smoothMapRoute(points, samples = 8) {
+  if (points.length < 3) return points;
+  const smooth = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const p0 = points[Math.max(0, index - 1)];
+    const p1 = points[index];
+    const p2 = points[index + 1];
+    const p3 = points[Math.min(points.length - 1, index + 2)];
+    for (let step = 0; step < samples; step += 1) {
+      const t = step / samples;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const interpolate = (key) => 0.5 * ((2 * p1[key]) + (-p0[key] + p2[key]) * t + (2 * p0[key] - 5 * p1[key] + 4 * p2[key] - p3[key]) * t2 + (-p0[key] + 3 * p1[key] - 3 * p2[key] + p3[key]) * t3);
+      smooth.push({ x: interpolate("x"), y: interpolate("y") });
+    }
+  }
+  smooth.push(points.at(-1));
+  return smooth;
+}
+
+function routeArrowIcon(selected, angle = 0) {
+  return L.divIcon({
+    className: `map-route-arrow${selected ? " selected" : ""}`,
+    html: `<svg viewBox="0 0 16 16" style="transform:rotate(${angle}deg)" aria-hidden="true"><path d="m5 3 5 5-5 5"/></svg>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
 function truckMapIcon(selected) {
-  const color = selected ? "#0bb7c6" : "#c77d36";
+  const color = selected ? "#13bac7" : "#8495a6";
   return L.divIcon({
     className: "map-truck-marker",
     html: `<span class="map-truck-symbol ${selected ? "selected" : ""}"><svg viewBox="0 0 32 24" aria-hidden="true"><path d="M2 4h18v13H2zM20 8h6l4 5v4h-10z" fill="${color}"/><path d="M21 9h4l3 4h-7z" fill="#d9f8fa"/><circle cx="8" cy="19" r="3"/><circle cx="24" cy="19" r="3"/></svg></span>`,
@@ -251,7 +290,19 @@ function mountMineMap(root) {
       const [x, y] = pair.split(",").map(Number);
       return mapCoordinate({ x, y });
     });
-    mineMapRoutes.set(route.tripId, L.polyline(points, { color: "#93a6b5", weight: 5, opacity: 0.72 }).addTo(mineMap));
+    const smooth = smoothMapRoute(route.points.split(" ").map((pair) => {
+      const [x, y] = pair.split(",").map(Number);
+      return { x, y };
+    })).map(mapCoordinate);
+    const halo = L.polyline(smooth, { color: "#e3eaeb", weight: 8, opacity: 0.12, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const line = L.polyline(smooth, { color: "#91a7ad", weight: 2.5, opacity: 0.52, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const middle = Math.floor(smooth.length / 2);
+    const before = smooth[Math.max(0, middle - 2)];
+    const after = smooth[Math.min(smooth.length - 1, middle + 2)];
+    const angle = Math.atan2(-(after[0] - before[0]), after[1] - before[1]) * 180 / Math.PI;
+    const arrow = L.marker(smooth[middle], { interactive: false, icon: routeArrowIcon(false, angle), zIndexOffset: 100 });
+    arrow.addTo(mineMap);
+    mineMapRoutes.set(route.tripId, { halo, line, arrow, angle });
   });
   operationsData.map.nodes.forEach((node) => {
     const marker = L.marker(mapCoordinate(node), {
@@ -261,7 +312,7 @@ function mountMineMap(root) {
   });
   operationsData.map.vehicles.forEach((vehicle) => {
     const marker = L.marker(mapCoordinate(vehicle), { icon: truckMapIcon(false), zIndexOffset: 400, title: vehicle.plate }).addTo(mineMap);
-    marker.bindTooltip(vehicle.plate, { direction: "top", offset: [0, -12], className: "map-truck-label" });
+    marker.bindTooltip(vehicle.plate, { permanent: true, direction: "top", offset: [0, -13], className: "map-truck-label" });
     marker.on("click", () => {
       selectedMapPlate = vehicle.plate;
       render(root);
@@ -275,7 +326,11 @@ function syncMineMap() {
   if (!mineMap) return;
   const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
   operationsData.map.routes.forEach((route) => {
-    mineMapRoutes.get(route.tripId)?.setStyle(selected?.tripId === route.tripId ? { color: "#0bb7c6", weight: 6, opacity: 0.96 } : { color: "#617487", weight: 4, opacity: 0.72 });
+    const layers = mineMapRoutes.get(route.tripId);
+    const active = selected?.tripId === route.tripId;
+    layers?.halo.setStyle({ color: active ? "#5ec4c9" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.1 });
+    layers?.line.setStyle(active ? { color: "#53b8bf", weight: 3.5, opacity: 0.88 } : { color: "#91a7ad", weight: 2.25, opacity: 0.44 });
+    layers?.arrow.setIcon(routeArrowIcon(active, layers.angle));
   });
   operationsData.map.vehicles.forEach((vehicle) => {
     const position = mapVehiclePosition(vehicle);
@@ -301,11 +356,11 @@ function renderMonitorVehicle(vehicle) {
 
 function renderWorkbench() {
   const open = getOpenAnomalies();
-  const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate) || operationsData.map.vehicles[0];
+  const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
   const trips = seedTrips.filter((trip) => matchesTrip(trip, searchValues.workbench, [(item) => item.id, (item) => item.plate]));
   return `
-    <div class="monitor-page"><div class="monitor-layout"><div class="monitor-map-column">${renderMineMap()}</div>
-      <aside class="monitor-rail"><div class="rail-heading"><div><span>选中车辆</span><strong>${selected.plate}</strong></div>${statusPill(getStatus(sampleTrips.get(selected.tripId)))}</div><div class="vehicle-rail-data"><div><span>当前趟次</span><button class="text-button" data-open-trip="${selected.tripId}">${selected.tripId} ›</button></div><div><span>运行状态</span><strong>${selected.status}</strong></div><div><span>计划路径</span><strong>${selected.route.join(" → ")}</strong></div><div><span>最后位置</span><strong>${selected.lastLocated}</strong></div></div><button class="button secondary rail-action" data-open-vehicle="${selected.plate}">查看车辆档案</button>
+    ${renderPageHeader("运营监控")}<div class="monitor-page"><div class="monitor-page-toolbar"><div><span class="simulation-pill">模拟回放</span><span>2026-04-01 · 示例矿区</span></div><div class="monitor-playback"><button class="icon-button" data-replay-step="-1" aria-label="上一步">‹</button><button class="button primary" data-replay-toggle>${replayPlaying ? "Ⅱ 暂停回放" : "▷ 模拟回放"}</button><input aria-label="回放进度" type="range" min="0" max="100" value="${replayProgress * 100}" data-replay-seek/><span>13:05—14:52</span><button class="icon-button" data-replay-step="1" aria-label="下一步">›</button><span class="replay-speed">1×</span></div></div><div class="monitor-layout"><div class="monitor-map-column">${renderMineMap()}</div>
+      <aside class="monitor-rail">${selected ? `<section class="selected-vehicle-detail"><div class="rail-heading"><div><span>选中车辆</span><strong>${selected.plate}</strong></div><button class="icon-button" data-clear-map-vehicle aria-label="关闭车辆详情">×</button></div><div class="vehicle-rail-data"><div><span>当前趟次</span><button class="text-button" data-open-trip="${selected.tripId}">${selected.tripId} ›</button></div><div><span>运行状态</span><strong>${selected.status}</strong></div><div><span>计划路径</span><strong>${selected.route.join(" → ")}</strong></div><div><span>最后位置</span><strong>${selected.lastLocated}</strong></div></div><button class="button secondary rail-action" data-open-vehicle="${selected.plate}">查看车辆档案</button></section>` : '<div class="vehicle-select-empty"><span class="empty-map-glyph">⌖</span><strong>全矿区视图</strong><span>选择地图车辆查看趟次与运行状态</span></div>'}
         <div class="rail-divider"></div><div class="section-heading"><h3>AI异常线索</h3><span>${open.length} 项</span></div>${open.length ? open.map((trip) => `<button class="monitor-alert" data-open-trip="${trip.id}"><span class="alert-mark">!</span><span><strong>${trip.issue}</strong><small>${trip.id} · ${trip.plate}</small><em>${escapeHtml(eventText(trip))}</em></span><b>查看 ›</b></button>`).join("") : '<div class="empty-state">当前没有待复核线索</div>'}
       </aside></div>
     <div class="monitor-search">${renderSearch("workbench", "搜索车牌或趟次")}${searchValues.workbench.trim() ? `<div class="search-results-panel">${trips.map(renderWorkbenchRow).join("") || '<div class="empty-state">没有匹配记录</div>'}</div>` : ""}</div>
@@ -432,7 +487,7 @@ function renderWeights(trip) {
 function renderEvidence(trip) {
   return `
     <section class="section-block evidence-section">
-      <div class="section-heading"><h3>车辆与装载影像</h3><span class="example-label">示例影像 · 未关联本趟现场摄像头 · 点击放大</span></div>
+      <div class="section-heading evidence-heading"><div><h3>车辆与装载影像</h3><span class="example-label">示例影像 · 未关联本趟现场摄像头</span></div><button class="button secondary camera-entry" data-open-monitor="${trip.id}">查看监控画面</button></div>
       <div class="evidence-grid">
         <button class="evidence-photo" data-photo="./public/images/weighbridge-example.jpg" aria-label="放大查看示例重车过磅影像"><img src="./public/images/weighbridge-example.jpg" alt="完整示例车辆在地磅上称重" /><span>重车过磅 · ${trip.times.gross}</span></button>
         <button class="evidence-photo" data-photo="./public/images/ore-truck-example.jpg" aria-label="放大查看示例装载影像"><img src="./public/images/ore-truck-example.jpg" alt="完整示例矿石运输车辆及装载情况" /><span>装载影像 · ${trip.material}</span></button>
@@ -550,6 +605,7 @@ function renderAudit() {
   if (selected) selectedTripId = selected.id;
   return `
     ${renderPageHeader("运输稽核")}
+    <div class="audit-toolbar">${renderSearch("audit", "搜索车牌、趟次或异常关键词")}<span class="audit-sort-note">待复核优先 · 时间降序</span></div>
     <div class="audit-layout">
       <section class="audit-list-panel"><div class="audit-filters"><button class="audit-filter ${auditFilter === "all" ? "selected" : ""}" data-audit-filter="all">全部 <b>${matchingTrips.length}</b></button><button class="audit-filter ${auditFilter === "pending" ? "selected" : ""}" data-audit-filter="pending">待复核 <b>${pendingTrips.length}</b></button><button class="audit-filter ${auditFilter === "verified" ? "selected" : ""}" data-audit-filter="verified">核实通过 <b>${verifiedTrips.length}</b></button></div><div class="audit-list">${trips.length ? trips.map(renderAuditRow).join("") : '<div class="empty-state">没有匹配记录</div>'}</div></section>
       ${renderAuditDetail(selected)}
@@ -719,6 +775,22 @@ function renderTrendChart(rows) {
   return `<div class="trend-chart"><div class="trend-legend">${series.map((item) => `<span class="${item.cls}"><i></i>${item.label}</span>`).join("")}<span class="chart-unit">吨 · 示例</span></div><svg viewBox="0 0 1000 240" role="img" aria-label="采矿量、运输净重和卸货接收量趋势"><path class="chart-gridline" d="M48 32H952M48 90H952M48 148H952M48 206H952"/><text x="8" y="36">${Math.round(max)}</text><text x="8" y="94">${Math.round(max * .67)}</text><text x="8" y="152">${Math.round(max * .33)}</text><text x="8" y="210">0</text>${series.map((item) => `<polyline class="chart-series ${item.cls}" points="${chartRows.map((row, index) => `${x(index)},${y(row[item.key])}`).join(" ")}"/>${chartRows.map((row, index) => `<circle class="chart-point ${item.cls}" cx="${x(index)}" cy="${y(row[item.key])}" r="3.5"/>`).join("")}`).join("")}${chartRows.map((row, index) => `<g class="chart-hit" data-analytics-date="${row.date}" tabindex="0" role="button" aria-label="查看 ${row.date} 来源"><circle cx="${x(index)}" cy="224" r="12"/><text x="${x(index)}" y="237">${row.date.slice(5)}</text></g>`).join("")}</svg></div>`;
 }
 
+function renderAnalyticsKpi(label, total, rows, key, cls) {
+  const average = rows.length ? Math.round(total / rows.length) : 0;
+  const max = Math.max(...rows.map((row) => row[key]), 1);
+  return `<article class="analytics-kpi ${cls}"><div><span>${label}</span><strong>${total.toLocaleString()}<small>吨</small></strong><small>日均 ${average.toLocaleString()} 吨 · ${rows.length} 天</small></div><div class="kpi-spark" role="img" aria-label="${label}每日示例趋势">${rows.map((row) => `<i style="--bar-height:${Math.max(8, row[key] / max * 100)}%"></i>`).join("")}</div></article>`;
+}
+
+function renderAnalyticsBreakdown(rows, field, metric, title, cls) {
+  const totals = Object.entries(rows.reduce((acc, row) => {
+    const label = row[field];
+    acc[label] = (acc[label] || 0) + row[metric];
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(...totals.map(([, value]) => value), 1);
+  return `<section class="analysis-panel breakdown-card ${cls}"><div class="panel-heading"><div><h2>${title}</h2><span>${rows.length} 天 · 示例汇总</span></div></div><div class="breakdown-list">${totals.map(([label, value]) => `<div class="breakdown-row"><span>${label}</span><div><i style="width:${value / max * 100}%"></i></div><strong>${value.toLocaleString()} 吨</strong></div>`).join("")}</div></section>`;
+}
+
 function renderAnalytics() {
   const rows = getPeriodRows();
   const totals = rows.reduce((acc, row) => ({ mined: acc.mined + row.minedTons, transport: acc.transport + row.verifiedTransportTons, unload: acc.unload + row.receivedUnloadTons }), { mined: 0, transport: 0, unload: 0 });
@@ -727,13 +799,16 @@ function renderAnalytics() {
   const chosen = rows.find((row) => row.date === analyticsDate) || rows.at(-1);
   const vehiclePeriodKey = analyticsPeriod === "month" ? "month" : "week";
   const vehicleRows = operationsData.vehiclePeriods.filter((vehicle) => vehicle.periodKey === vehiclePeriodKey && matchesTrip(vehicle, query, [(item) => item.plate, (item) => item.sourceRecordId]));
+  const vehicleMax = Math.max(...vehicleRows.map((vehicle) => vehicle.verifiedTons), 1);
   return `
     ${renderPageHeader("生产与运力分析")}
     <div class="analysis-controls"><div><strong>示例矿区</strong><span>${rows[0]?.date || "—"} 至 ${rows.at(-1)?.date || "—"}</span><small>${operationsData.scopeLabel}</small></div><div class="analysis-actions">${renderSearch("analytics", "搜索日期、采区、车辆或卸货点")}${renderPeriodTabs()}</div></div>
+    <section class="analytics-kpis">${renderAnalyticsKpi("采矿量", totals.mined, rows, "minedTons", "mined")}${renderAnalyticsKpi("核实运输净重", totals.transport, rows, "verifiedTransportTons", "transport")}${renderAnalyticsKpi("卸点接收量", totals.unload, rows, "receivedUnloadTons", "unload")}</section>
     <div class="analytics-body"><main class="analysis-main">
       <section class="analysis-panel"><div class="panel-heading"><div><h2>产运关键指标趋势</h2><span>${rows[0]?.date || "—"} 至 ${rows.at(-1)?.date || "—"} · ${analyticsPeriod === "day" ? "日" : analyticsPeriod === "week" ? "周" : "月"} · 示例</span></div><button class="text-button" data-view="ai">生成分析报告 ›</button></div>${renderTrendChart(rows)}</section>
+      <div class="analytics-breakdowns">${renderAnalyticsBreakdown(rows, "miningArea", "minedTons", "采区采矿量分布", "area-breakdown")}${renderAnalyticsBreakdown(rows, "unloadPoint", "receivedUnloadTons", "卸点接收量分布", "unload-breakdown")}</div>
       <section class="analysis-panel"><div class="panel-heading"><div><h2>生产与运输明细</h2><span>${displayRows.length} 个日期 · 数据来源独立</span></div></div><div class="metric-table-wrap"><table class="metric-table"><thead><tr><th>日期</th><th>采区</th><th>采矿量</th><th>运输净重</th><th>卸货点</th><th>接收量</th><th>来源</th></tr></thead><tbody>${displayRows.map((row) => `<tr class="${row.date === analyticsDate ? "selected" : ""}"><td><button class="table-date-button" data-analytics-date="${row.date}">${row.date}</button></td><td>${row.miningArea}</td><td>${row.minedTons} 吨</td><td>${row.verifiedTransportTons} 吨</td><td>${row.unloadPoint}</td><td>${row.receivedUnloadTons} 吨</td><td><button class="text-button" data-source-record="${row.sourceIds.mining}">示例汇总 ›</button></td></tr>`).join("")}</tbody></table></div></section>
-      <section class="analysis-panel vehicle-capacity-panel"><div class="panel-heading"><div><h2>车辆周期运力</h2><span>${vehicleRows[0]?.periodLabel || "扩展示例"} · 无利用率推算</span></div></div><div class="capacity-table-head"><span>车辆</span><span>有效趟次</span><span>核实吨位</span><span>均载重</span><span>周转</span></div>${vehicleRows.map((vehicle) => `<div class="capacity-item"><button class="capacity-row" data-open-vehicle="${vehicle.plate}"><strong>${vehicle.plate}</strong><span>${vehicle.trips}</span><span>${vehicle.verifiedTons.toFixed(1)} 吨</span><span>${vehicle.averagePayload.toFixed(2)} 吨</span><span>${vehicle.turnaroundMinutes} 分</span></button><button class="capacity-source" data-source-record="${vehicle.sourceRecordId}">来源</button></div>`).join("")}</section>
+      <section class="analysis-panel vehicle-capacity-panel"><div class="panel-heading"><div><h2>车辆周期运力</h2><span>${vehicleRows[0]?.periodLabel || "扩展示例"} · 吨位对比，不推算利用率</span></div></div><div class="capacity-table-head"><span>车辆</span><span>有效趟次</span><span>核实吨位</span><span>均载重</span><span>周转</span></div>${vehicleRows.map((vehicle) => `<div class="capacity-item"><button class="capacity-row" data-open-vehicle="${vehicle.plate}"><strong>${vehicle.plate}</strong><span>${vehicle.trips}</span><span class="capacity-tonnage">${vehicle.verifiedTons.toFixed(1)} 吨<i><b style="width:${vehicle.verifiedTons / vehicleMax * 100}%"></b></i></span><span>${vehicle.averagePayload.toFixed(2)} 吨</span><span>${vehicle.turnaroundMinutes} 分</span></button><button class="capacity-source" data-source-record="${vehicle.sourceRecordId}">来源</button></div>`).join("")}</section>
     </main><aside class="source-detail"><div class="source-date"><strong>${chosen?.date || "—"}（${chosen?.miningArea || "示例范围"}）</strong></div><div class="source-metric mining"><i></i><strong>采矿量</strong><b>${chosen?.minedTons ?? "—"} 吨</b><small>来源：采装计量样例 · ${chosen?.sourceIds.mining || "—"}</small><small>定义：采区在统计周期内的采出量</small></div><div class="source-metric transport"><i></i><strong>核实运输净重</strong><b>${chosen?.verifiedTransportTons ?? "—"} 吨</b><small>来源：人工核实趟次 · ${chosen?.sourceIds.transport || "—"}</small><small>定义：仅统计人工核实通过的趟次净重</small></div><div class="source-metric unload"><i></i><strong>卸货接收量</strong><b>${chosen?.receivedUnloadTons ?? "—"} 吨</b><small>来源：卸点接收磅单 · ${chosen?.sourceIds.unload || "—"}</small><small>定义：卸点/堆场接收计量</small></div><section class="source-related"><strong>当日关联运输明细（示例）</strong><span>汇总样例来源不等同原始磅单</span>${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}<button class="text-button" data-source-record="${chosen?.sourceIds.mining}">查看采矿来源 ›</button><button class="text-button" data-source-record="${chosen?.sourceIds.transport}">查看运输来源 ›</button><button class="text-button" data-source-record="${chosen?.sourceIds.unload}">查看卸货来源 ›</button></section></aside></div>
   `;
 }
@@ -757,42 +832,92 @@ function renderChatTrend(rows, key) {
   return `<div class="chat-trend" role="img" aria-label="28天采矿量示例趋势">${rows.map((row) => `<span title="${row.date} · ${row[key]} 吨" style="--bar-height:${Math.max(8, row[key] / max * 100)}%"><i></i></span>`).join("")}</div><div class="chat-trend-range"><span>${rows[0]?.date || "—"}</span><strong>${rows.length} 天 · 吨</strong><span>${rows.at(-1)?.date || "—"}</span></div>`;
 }
 
+function matchChatIntent(question) {
+  const query = question.toLocaleLowerCase();
+  if (query.includes("生成") && query.includes("报告")) return "report";
+  if (/晋B[·.]?24680|车辆|运力/.test(query) && /周|月|周期|运力/.test(query)) return query.includes("月") ? "vehicle-month-capacity" : "vehicle-capacity";
+  if (/采矿|采区|采出/.test(query)) return "production-trend";
+  if (/卸点|卸货|接收量/.test(query)) return "unload-trend";
+  if (/异常|稽核/.test(query)) return "anomaly-review";
+  if (/今天|今日/.test(query) && /运输|趟次|卸货/.test(query)) return "daily-operation";
+  return null;
+}
+
+function startChatQuery(root, question, requestedIntent = null) {
+  clearTimeout(chatStreamTimer);
+  clearInterval(chatStreamTimer);
+  chatQueryId += 1;
+  const queryId = chatQueryId;
+  chatQuestion = question.trim();
+  chatDraft = "";
+  selectedChat = requestedIntent || matchChatIntent(chatQuestion);
+  const matched = operationsData.chatExamples.find((example) => example.intent === selectedChat);
+  chatAnswer = matched
+    ? { ...matched, question: chatQuestion }
+    : { question: chatQuestion, answer: "当前演示支持运输日汇总、车辆周/月运力、采矿趋势、卸点接收量、稽核异常和明确提出的报告生成。可选择上方示例问题查看对应结果。", period: "未识别到支持的查询范围", metric: "未生成统计结果", sources: [], resultType: "unsupported" };
+  chatStreamText = "";
+  chatState = "thinking";
+  render(root);
+  chatStreamTimer = setTimeout(() => {
+    if (queryId !== chatQueryId) return;
+    chatState = "streaming";
+    render(root);
+    let offset = 0;
+    chatStreamTimer = setInterval(() => {
+      if (queryId !== chatQueryId) {
+        clearInterval(chatStreamTimer);
+        return;
+      }
+      offset = Math.min(chatAnswer.answer.length, offset + 10);
+      chatStreamText = chatAnswer.answer.slice(0, offset);
+      const target = root.querySelector("[data-answer-copy]");
+      if (target) target.textContent = chatStreamText;
+      if (offset >= chatAnswer.answer.length) {
+        clearInterval(chatStreamTimer);
+        chatState = "complete";
+        render(root);
+      }
+    }, 32);
+  }, 480);
+}
+
 function renderChatAnswer(item) {
   if (!item) return "";
+  const streaming = chatState === "streaming";
   let detail = "";
   let action = "";
-  if (item.resultType === "operation-summary") {
+  if (chatState === "complete" && item.resultType === "operation-summary") {
     const verified = getVerifiedTrips();
     const pending = getUnresolvedTrips();
     const total = verified.reduce((sum, trip) => sum + getNetWeight(trip), 0);
     const day = operationsData.dailyMetrics.find((row) => row.date === "2026-04-01");
     detail = `<div class="answer-metrics"><div><span>运输趟次</span><strong>${seedTrips.length} 趟</strong></div><div><span>核实通过</span><strong>${verified.length} 趟 · ${formatWeight(total)} 吨</strong></div><div><span>待复核</span><strong>${pending.length} 趟</strong></div><div><span>卸货接收量</span><strong>${day?.receivedUnloadTons ?? "—"} 吨</strong></div></div><div class="answer-table"><div><span>趟次 / 车辆</span><span>净重</span><span>人工状态</span></div>${seedTrips.map((trip) => `<button data-open-trip="${trip.id}"><span>${trip.id} · ${trip.plate}</span><span>${formatWeight(getNetWeight(trip))} 吨</span><span>${statusPill(getStatus(trip))}</span></button>`).join("")}</div>`;
     action = '<button class="button secondary" data-view="audit">打开运输稽核</button>';
-  } else if (item.resultType === "vehicle-capacity") {
+  } else if (chatState === "complete" && item.resultType === "vehicle-capacity") {
     const vehicle = operationsData.vehiclePeriods.find((record) => record.sourceRecordId === item.sourceRecordIds[0]);
     detail = `<div class="answer-metrics"><div><span>有效趟次</span><strong>${vehicle.trips} 趟</strong></div><div><span>核实净重</span><strong>${vehicle.verifiedTons.toFixed(1)} 吨</strong></div><div><span>均载重</span><strong>${vehicle.averagePayload.toFixed(2)} 吨</strong></div><div><span>平均周转</span><strong>${vehicle.turnaroundMinutes} 分</strong></div></div><div class="answer-note">缺少额定载荷与可运营时长，暂不计算利用率。</div>`;
     action = `<button class="button secondary" data-open-vehicle="${item.plate}">查看 ${item.plate} 档案</button>`;
-  } else if (item.resultType === "production-trend") {
+  } else if (chatState === "complete" && item.resultType === "production-trend") {
     const rows = operationsData.dailyMetrics;
     const total = rows.reduce((sum, row) => sum + row.minedTons, 0);
     const areas = [...new Set(rows.map((row) => row.miningArea))].map((area) => ({ area, total: rows.filter((row) => row.miningArea === area).reduce((sum, row) => sum + row.minedTons, 0) }));
     detail = `<div class="answer-metrics"><div><span>周期采矿量</span><strong>${total.toLocaleString()} 吨</strong></div><div><span>统计日期</span><strong>${rows.length} 天</strong></div><div><span>采区数</span><strong>${areas.length} 个</strong></div></div>${renderChatTrend(rows, "minedTons")}<div class="answer-breakdown">${areas.map((area) => `<span><i></i>${area.area}<strong>${area.total.toLocaleString()} 吨</strong></span>`).join("")}</div>`;
     action = '<button class="button secondary" data-view="analytics">查看生产与运力分析</button>';
-  } else if (item.resultType === "unload-trend") {
+  } else if (chatState === "complete" && item.resultType === "unload-trend") {
     const rows = operationsData.dailyMetrics;
     const total = rows.reduce((sum, row) => sum + row.receivedUnloadTons, 0);
     const groups = [...new Set(rows.map((row) => row.unloadPoint))].map((point) => ({ point, total: rows.filter((row) => row.unloadPoint === point).reduce((sum, row) => sum + row.receivedUnloadTons, 0) }));
     detail = `<div class="answer-metrics"><div><span>周期接收量</span><strong>${total.toLocaleString()} 吨</strong></div><div><span>卸货点</span><strong>${groups.length} 个</strong></div><div><span>日明细</span><strong>${rows.length} 天</strong></div></div><div class="answer-breakdown">${groups.map((group) => `<span><i></i>${group.point}<strong>${group.total.toLocaleString()} 吨</strong></span>`).join("")}</div><div class="answer-table daily-unload-table"><div><span>日期</span><span>卸货点</span><span>接收量</span><span>来源</span></div>${rows.map((row) => `<div><span>${row.date}</span><span>${row.unloadPoint}</span><strong>${row.receivedUnloadTons} 吨</strong><button class="text-button" data-source-record="${row.sourceIds.unload}">查看</button></div>`).join("")}</div><div class="answer-note">按卸点接收磅单单独统计；不以运输净重替代接收量。</div>`;
     action = '<button class="button secondary" data-view="analytics">查看卸货趋势</button>';
-  } else if (item.resultType === "anomaly-list") {
+  } else if (chatState === "complete" && item.resultType === "anomaly-list") {
     const anomalies = getOpenAnomalies();
     detail = `<div class="answer-note anomaly-note">${anomalies.length} 条待复核线索 · AI提示不等于违规结论</div><div class="answer-anomalies">${anomalies.map((trip) => `<button data-open-trip="${trip.id}"><span><strong>${escapeHtml(trip.issue)}</strong><small>${trip.id} · ${trip.plate} · ${trip.occurredAt.replace("T", " ")}</small></span><span>${escapeHtml(eventText(trip))}</span><b>查看 ›</b></button>`).join("") || '<div class="empty-state">当前没有待复核异常线索</div>'}</div>`;
     action = '<button class="button secondary" data-view="audit">进入运输稽核</button>';
-  } else if (item.resultType === "report-preview") {
-    detail = `<div class="report-preview"><strong>报告内容</strong><ul><li>车辆有效趟次、核实净重、均载重与周转时长</li><li>卸点接收趋势与独立数据口径</li><li>汇总来源和关联记录</li></ul><small>范围：${item.period} · 示例数据</small></div>`;
+  } else if (chatState === "complete" && item.resultType === "report-preview") {
+    detail = `<div class="report-preview"><strong>本月运营报告</strong><span>28 天趋势 · 四车运力对比 · 每日指标与来源</span><small>范围：${item.period} · 示例数据</small></div>`;
     action = '<button class="button primary" data-generate-report>生成报告</button>';
   }
-  return `<article class="chat-answer answer-${item.resultType}"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>${escapeHtml(item.question)}</strong><small>${item.period} · 示例数据</small></div></div><p>${escapeHtml(item.answer)}</p>${detail}<div class="answer-scope"><div><span>指标口径</span><strong>${item.metric}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${source}</small>`).join("")}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}${action ? `<div class="answer-actions">${action}</div>` : ""}</article>`;
+  return `<article class="chat-answer answer-${item.resultType}"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>${escapeHtml(item.question)}</strong><small>${item.period} · 示例数据 · 演示响应</small></div></div><p data-answer-copy>${escapeHtml(streaming ? chatStreamText : item.answer)}${streaming ? '<i class="stream-caret" aria-hidden="true"></i>' : ""}</p>${detail}${chatState === "complete" ? `<div class="answer-scope"><div><span>指标口径</span><strong>${escapeHtml(item.metric)}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${escapeHtml(source)}</small>`).join("") || "<small>未查询平台数据</small>"}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}${action ? `<div class="answer-actions">${action}</div>` : ""}` : ""}</article>`;
 }
 
 function renderFilePreview() {
@@ -801,20 +926,81 @@ function renderFilePreview() {
 }
 
 function renderAiWorkbench() {
-  const item = selectedChat ? operationsData.chatExamples.find((example) => example.intent === selectedChat) : null;
+  const item = chatAnswer;
   return `
     ${renderPageHeader("AI工作台")}
-    <div class="ai-workspace"><section class="chat-column"><div class="chat-heading"><div><h2>矿山运营问答</h2><span>查运营数据、追溯来源、生成报告</span></div><span class="ai-status"><i></i>示例数据</span></div>
+    <div class="ai-workspace ${aiDockView === "hidden" ? "" : "has-side-panel"}"><section class="chat-column"><div class="chat-heading"><div><h2>矿山运营问答</h2><span>查运营数据、追溯来源、生成报告</span></div><div class="chat-heading-actions"><button class="button secondary" data-open-ai-dock="reports">历史报告 <b>${reports.length}</b></button><button class="button secondary" data-open-ai-dock="files">文件解析 <b>${fileReports.length + (pendingUpload ? 1 : 0)}</b></button><span class="ai-status"><i></i>示例数据</span></div></div>
       <div class="chat-prompts">${operationsData.chatExamples.map((example) => `<button class="prompt-button ${selectedChat === example.intent ? "selected" : ""}" data-chat-example="${example.intent}">${example.question}<span>↗</span></button>`).join("")}</div>
-      <div class="chat-conversation">${chatQuestion ? `<div class="user-question">${escapeHtml(chatQuestion)}</div>` : `<div class="user-question">${escapeHtml(item?.question || "查询矿山运营情况")}</div>`}${renderChatAnswer(item)}${chatQuestion && !item ? `<div class="chat-answer"><p>当前演示支持运输汇总、车辆运力、采矿趋势、卸货接收和异常查询。请选择一个示例问题查看来源化结果。</p></div>` : ""}</div>
-      <form class="chat-composer" data-chat-form><input name="question" value="${escapeHtml(chatQuestion)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="composer-file" type="button" data-ai-tab="files" aria-label="上传文件">＋</button><button class="button primary" type="submit">查询</button></form>
-    </section><aside class="file-column"><div class="file-column-heading"><h2>报告与文件</h2><span>结果可追溯</span></div><div class="ai-content-tabs"><button class="ai-content-tab ${aiContentTab === "reports" ? "selected" : ""}" data-ai-tab="reports">报告 <b>${reports.length}</b></button><button class="ai-content-tab ${aiContentTab === "files" ? "selected" : ""}" data-ai-tab="files">文件解析 <b>${fileReports.length + (pendingUpload ? 1 : 0)}</b></button></div>
-      ${aiContentTab === "reports" ? `<div class="report-list">${reports.length ? reports.map((report, index) => `<div class="report-row"><span><strong>${escapeHtml(report.title)}</strong><small>${report.createdAt} · ${report.origin}</small></span><button class="text-button" data-download-report="${index}">下载 .md</button></div>`).join("") : '<div class="ai-dock-empty">报告将在这里归档</div>'}</div>` : `<label class="upload-button"><input type="file" data-file-upload accept=".csv,.txt,.md,text/csv,text/plain,text/markdown"/><span>＋ 上传 CSV / TXT / MD</span></label>${renderFilePreview()}<div class="uploaded-list">${fileReports.length ? fileReports.map((report, index) => `<div class="uploaded-row"><strong>${escapeHtml(report.name)}</strong><small>文件来源 · 已确认</small><button class="text-button" data-download-file-report="${index}">下载报告</button></div>`).join("") : '<div class="file-empty">支持 CSV、TXT、MD</div>'}</div>`}</aside></div>
+      <div class="chat-conversation">${chatQuestion ? `<div class="user-question">${escapeHtml(chatQuestion)}</div>` : `<div class="conversation-empty">${chatDraft ? "问题已回填，点击查询开始分析。" : "选择一个问题，或输入矿山运营问题。"}</div>`}${chatState === "thinking" ? '<div class="ai-thinking"><span class="ai-avatar">AI</span><div><strong>正在分析问题</strong><small>识别矿区、时间范围与数据口径</small><i><b></b><b></b><b></b></i></div></div>' : renderChatAnswer(item)}</div>
+      <form class="chat-composer" data-chat-form><input name="question" data-chat-composer-input value="${escapeHtml(chatDraft)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="composer-file" type="button" data-ai-tab="files" aria-label="上传文件">＋</button><button class="button primary" type="submit">查询</button></form>
+    </section>${renderAiSidePanel()}</div>
   `;
 }
 
+function renderAiSidePanel() {
+  if (aiDockView === "hidden") return "";
+  if (aiDockView === "report" && reportPreview) return `<aside class="file-column report-side-panel"><header class="report-dock-heading"><button class="text-button" data-close-report>‹ 历史报告</button><button class="icon-button" data-close-ai-dock aria-label="关闭报告">×</button><div><span>HTML 报告 · 示例数据</span><h2>${escapeHtml(reportPreview.title)}</h2></div><div class="report-dock-actions"><button class="button secondary" data-export-word>下载 Word</button><button class="button secondary" data-print-report>打印 / 保存 PDF</button></div></header><article class="report-html-preview">${reportBodyHtml(reportPreview)}</article></aside>`;
+  if (aiDockView === "reports") return `<aside class="file-column ai-dock-list"><header class="dock-list-heading"><div><span>报告 · ${reports.length} 份</span><h2>历史报告</h2></div><button class="icon-button" data-close-ai-dock aria-label="关闭历史报告">×</button></header>${reports.length ? `<div class="report-list">${reports.map((report, index) => `<div class="report-row"><span><strong>${escapeHtml(report.title)}</strong><small>${report.createdAt} · ${report.origin}</small></span><button class="text-button" data-view-report="${index}">打开报告 ›</button></div>`).join("")}</div>` : '<div class="ai-dock-empty">提交报告问题后，可在这里查看生成记录</div>'}</aside>`;
+  if (aiDockView === "files") return `<aside class="file-column ai-dock-list"><header class="dock-list-heading"><div><span>文件解析 · ${fileReports.length + (pendingUpload ? 1 : 0)} 项</span><h2>文件与整理结果</h2></div><button class="icon-button" data-close-ai-dock aria-label="关闭文件解析">×</button></header><label class="upload-button"><input type="file" data-file-upload accept=".csv,.txt,.md,text/csv,text/plain,text/markdown"/><span>＋ 上传 CSV / TXT / MD</span></label>${renderFilePreview()}<div class="uploaded-list">${fileReports.length ? fileReports.map((report, index) => `<div class="uploaded-row"><strong>${escapeHtml(report.name)}</strong><small>文件来源 · 已确认</small><button class="text-button" data-view-file-report="${index}">打开 ›</button></div>`).join("") : '<div class="file-empty">尚无文件整理结果</div>'}</div></aside>`;
+  return "";
+}
+
 function renderLightbox() {
-  return `<div class="lightbox" data-lightbox hidden role="dialog" aria-modal="true" aria-label="示例车辆影像"><button class="lightbox-close" data-close-photo aria-label="关闭影像">×</button><img data-lightbox-image alt="完整示例车辆影像" /></div>`;
+  return `<div class="lightbox" data-lightbox hidden role="dialog" aria-modal="true" aria-label="示例车辆影像"><button class="lightbox-close" data-close-photo aria-label="关闭影像">×</button><img data-lightbox-image alt="完整示例车辆影像" /></div>${renderMonitorModal()}`;
+}
+
+function renderMonitorModal() {
+  if (!monitorModalOpen) return '<div class="monitor-modal" data-monitor-modal hidden></div>';
+  const trip = sampleTrips.get(selectedTripId);
+  if (!trip) return "";
+  const replay = monitorReplay || { date: trip.occurredAt.slice(0, 10), start: trip.times.gross, end: trip.times.tare, searched: false, matched: false };
+  const tripStart = timeToMinutes(trip.times.gross);
+  const tripEnd = timeToMinutes(trip.times.tare);
+  const clipStart = Math.max(0, Math.min(1, (timeToMinutes(replay.start) - tripStart) / (tripEnd - tripStart)));
+  const clipEnd = Math.max(0, Math.min(1, (timeToMinutes(replay.end) - tripStart) / (tripEnd - tripStart)));
+  const cameraLabel = monitorMode === "live" ? trip.grossStation : trip.unloadRecord;
+  const cameraName = monitorMode === "live" ? "承重点摄像头" : "卸货点摄像头";
+  return `<div class="monitor-modal" data-monitor-modal role="dialog" aria-modal="true" aria-labelledby="camera-title"><button class="modal-backdrop" data-close-monitor aria-label="关闭监控"></button><section class="monitor-dialog"><header class="monitor-dialog-head"><div><span class="modal-kicker">${trip.id} · ${trip.plate}</span><h2 id="camera-title">运输监控</h2></div><button class="icon-button" data-close-monitor aria-label="关闭">×</button></header><div class="monitor-tabs"><button class="monitor-tab ${monitorMode === "live" ? "selected" : ""}" data-monitor-mode="live">实时演示</button><button class="monitor-tab ${monitorMode === "replay" ? "selected" : ""}" data-monitor-mode="replay">历史回放</button></div><div class="camera-meta"><span class="camera-led"></span><strong>${cameraName}</strong><span>${escapeHtml(cameraLabel)}</span><small>演示视频 · 未连接现场摄像头</small></div>${monitorMode === "replay" ? `<form class="camera-replay-form" data-camera-query><label>日期<input type="date" name="date" value="${replay.date}" required /></label><label>开始<input type="time" name="start" value="${replay.start}" required /></label><label>结束<input type="time" name="end" value="${replay.end}" required /></label><button class="button primary" type="submit">查询回放</button></form>` : ""}${monitorMode === "replay" && replay.searched && !replay.matched ? `<div class="camera-empty">所选时段没有这趟运输的演示录像。可选时段需覆盖 ${trip.times.gross}–${trip.times.tare}。</div>` : `<div class="camera-video-wrap"><video src="./public/videos/cctv-demo.mp4" data-clip-start="${clipStart}" data-clip-end="${clipEnd}" ${monitorMode === "live" || !replay.searched ? "autoplay loop" : "controls"} muted playsinline></video><div class="camera-watermark">${monitorMode === "live" ? "LIVE · 模拟画面" : "回放 · 模拟片段"}</div><div class="camera-video-time">${trip.occurredAt.slice(0, 10)}　${monitorMode === "replay" && replay.searched ? `${replay.start}—${replay.end}` : `${trip.times.gross}—${trip.times.tare}`}</div></div>${monitorMode === "replay" ? `<div class="camera-events"><span>本趟事件</span><button type="button" data-camera-event="gross">重车承重 ${trip.times.gross}</button><button type="button" data-camera-event="unload">卸货 ${trip.times.unload}</button><button type="button" data-camera-event="tare">空车回皮 ${trip.times.tare}</button></div>` : `<div class="camera-live-note"><span>画面循环播放，用于体验查看入口与操作</span><span>采样时间 ${trip.times.gross}</span></div>`}`}</section></div>`;
+}
+
+function reportBodyHtml(report) {
+  if (!report.item) {
+    const fileData = report.rows?.length
+      ? `<div class="report-table-wrap"><table><thead><tr>${report.rows[0].cells.map((cell) => `<th>${escapeHtml(cell)}</th>`).join("")}</tr></thead><tbody>${report.rows.slice(1).map((row) => `<tr>${row.cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+      : `<pre>${escapeHtml(report.excerpt || "文件内容为空")}</pre>`;
+    return `<div class="report-document"><div class="report-brand">矿山运营平台 <span>文件整理</span></div><h1>文件整理报告</h1><div class="report-meta">${escapeHtml(report.name)} · ${escapeHtml(report.type)} · 用户上传</div><section><h2>内容整理</h2>${fileData}</section><section><h2>来源与范围</h2><p>来源文件：${escapeHtml(report.name)}</p><p>位置：${escapeHtml(report.sourceRef || "文件内容")}</p><p>该文件报告与平台运营统计分开保存。</p></section></div>`;
+  }
+  const item = report.item;
+  const snapshot = report.snapshot || buildReportSnapshot(item);
+  const totals = snapshot.totals;
+  const dailyChart = renderReportDailyChart(snapshot.dailyRows);
+  const vehicleChart = renderReportVehicleChart(snapshot.vehicleRows);
+  return `<div class="report-document"><div class="report-brand">矿山运营平台 <span>AI运营报告 · 示例</span></div><h1>${escapeHtml(report.title)}</h1><div class="report-meta">${escapeHtml(item.period)}　·　生成于 ${escapeHtml(report.createdAt || "当前会话")}　·　示例数据</div><section><h2>结论摘要</h2><p>${escapeHtml(item.answer)}</p></section><section><h2>本期关键指标</h2><div class="report-kpis"><div><span>采矿量</span><strong>${totals.mined.toLocaleString()}<small>吨</small></strong></div><div><span>核实运输净重</span><strong>${totals.transport.toLocaleString()}<small>吨</small></strong></div><div><span>卸点接收量</span><strong>${totals.unload.toLocaleString()}<small>吨</small></strong></div></div></section><section><h2>每日产运与接收趋势</h2><p>采矿量、核实运输净重和卸点接收量来自不同业务记录，分别观察，不用差值判断损耗。</p>${dailyChart}</section><section><h2>车辆月度运力</h2><p>按月展示各车人工核实运输净重和有效趟次；无额定载荷与可运营时长，不推算利用率。</p>${vehicleChart}</section><section><h2>逐日指标明细</h2><div class="report-table-wrap"><table><thead><tr><th>日期 / 来源记录</th><th>采矿量（吨）</th><th>核实运输净重（吨）</th><th>卸点接收量（吨）</th></tr></thead><tbody>${snapshot.dailyRows.map((row) => `<tr><td>${escapeHtml(row.date)}<small>${Object.values(row.sourceIds).map(escapeHtml).join(" · ")}</small></td><td>${row.minedTons}</td><td>${row.verifiedTransportTons}</td><td>${row.receivedUnloadTons}</td></tr>`).join("")}</tbody></table></div></section><section><h2>指标口径与来源</h2><ul><li>采矿量：采装计量示例数据。</li><li>核实运输净重：仅计人工核实通过的趟次。</li><li>卸点接收量：卸点接收磅单示例数据。</li><li>车辆运力：有效趟数、核实净重、平均载重与周转时长。</li></ul><ul>${item.sources.map((source) => `<li>${escapeHtml(source)}</li>`).join("")}</ul><p>本报告为模拟数据分析，不代表矿区现场事实；没有目标产量和成本口径，不提供完成率、节约额或损失额。</p></section></div>`;
+}
+
+function buildReportSnapshot(item) {
+  const dailyRows = operationsData.dailyMetrics.map((row) => ({ ...row }));
+  const vehicleRows = operationsData.vehiclePeriods.filter((row) => row.periodKey === "month").map((row) => ({ ...row }));
+  return {
+    period: item.period,
+    dailyRows,
+    vehicleRows,
+    totals: dailyRows.reduce((sum, row) => ({ mined: sum.mined + row.minedTons, transport: sum.transport + row.verifiedTransportTons, unload: sum.unload + row.receivedUnloadTons }), { mined: 0, transport: 0, unload: 0 }),
+  };
+}
+
+function renderReportDailyChart(rows) {
+  const series = [{ key: "minedTons", name: "采矿量", color: "#16a6b5" }, { key: "verifiedTransportTons", name: "核实运输净重", color: "#3478d4" }, { key: "receivedUnloadTons", name: "卸点接收量", color: "#c77d36" }];
+  const max = Math.max(...rows.flatMap((row) => series.map((entry) => row[entry.key])));
+  const x = (index) => 58 + index * 510 / Math.max(1, rows.length - 1);
+  const y = (value) => 162 - value / max * 126;
+  const labels = rows.filter((_, index) => index % 4 === 0 || index === rows.length - 1);
+  return `<div class="report-chart"><div class="report-chart-legend">${series.map((entry) => `<span><i style="background:${entry.color}"></i>${entry.name}</span>`).join("")}<small>吨 · 28 天示例</small></div><svg viewBox="0 0 600 210" role="img" aria-label="28天采矿量、核实运输净重和卸点接收量趋势图"><path d="M58 36H568M58 78H568M58 120H568M58 162H568" stroke="#e5ebf0" fill="none"/><g fill="#8795a4" font-size="9"><text x="7" y="39">${Math.round(max)}</text><text x="7" y="81">${Math.round(max * .67)}</text><text x="7" y="123">${Math.round(max * .33)}</text><text x="36" y="165">0</text></g>${series.map((entry) => `<polyline points="${rows.map((row, index) => `${x(index)},${y(row[entry.key])}`).join(" ")}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`).join("")}${labels.map((row) => { const index = rows.indexOf(row); return `<text x="${x(index)}" y="190" text-anchor="middle" fill="#708093" font-size="10">${row.date.slice(5)}</text>`; }).join("")}</svg></div>`;
+}
+
+function renderReportVehicleChart(rows) {
+  const max = Math.max(...rows.map((row) => row.verifiedTons));
+  return `<div class="report-vehicle-chart">${rows.map((row) => `<div class="report-vehicle-bar"><span>${escapeHtml(row.plate)}</span><div><i style="width:${row.verifiedTons / max * 100}%"></i></div><strong>${row.verifiedTons.toLocaleString()} 吨</strong><small>${row.trips} 趟</small></div>`).join("")}<small>月度人工核实运输净重 · 吨</small></div>`;
 }
 
 function renderToast() {
@@ -822,12 +1008,9 @@ function renderToast() {
 }
 
 function renderGlobalBar() {
-  if (activeView === "workbench") {
-    return `<header class="app-topbar monitor-topbar"><div class="monitor-context"><span class="global-site-dot"></span><strong>示例矿区</strong><button class="topbar-select">长青矿山⌄</button><button class="topbar-select">▣ 2026-04-01⌄</button></div><div class="monitor-playback"><button class="icon-button" data-replay-step="-1" aria-label="上一步">‹</button><button class="button primary" data-replay-toggle>${replayPlaying ? "Ⅱ 暂停回放" : "▷ 模拟回放"}</button><input aria-label="回放进度" type="range" min="0" max="100" value="${replayProgress * 100}" data-replay-seek/><span>13:05—14:52</span><button class="icon-button" data-replay-step="1" aria-label="下一步">›</button><span class="replay-speed">1×</span></div><div class="topbar-actions"><button class="icon-button" aria-label="通知">♧</button><button class="customer-quick-link" data-enter-customer>客户体验</button><span class="operator-avatar">张</span><span class="operator-name">调度员⌄</span></div></header>`;
-  }
   const range = getPeriodRows();
   const context = activeView === "analytics" ? `${range[0]?.date || "—"} ~ ${range.at(-1)?.date || "—"}` : "2026-04-01 ~ 2026-04-28";
-  return `<header class="app-topbar"><div class="global-context"><span class="global-site-dot"></span><strong>示例矿区</strong><button class="topbar-select">长青矿山⌄</button><button class="topbar-select">▣ ${context}⌄</button>${activeView === "audit" ? renderSearch("audit", "搜索车牌、运单号或关键字") : ""}</div><div class="topbar-actions"><button class="icon-button" aria-label="通知">♧</button><button class="customer-quick-link" data-enter-customer>客户体验</button><span class="operator-avatar">张</span><span class="operator-name">张工⌄</span></div></header>`;
+  return `<header class="app-topbar"><div class="global-context"><span class="global-site-dot"></span><strong>示例矿区</strong><span class="scope-chip"><span class="scope-icon">${icon("location")}</span>长青矿山</span><span class="scope-chip"><span class="scope-icon">${icon("calendar")}</span>${context}</span></div><div class="topbar-actions"><button class="icon-button" aria-label="通知">♧</button><button class="customer-quick-link" data-enter-customer>客户体验</button><span class="operator-avatar">张</span><span class="operator-name">张工⌄</span></div></header>`;
 }
 
 function createCustomerExperience() {
@@ -889,8 +1072,8 @@ function render(root, focusSearch = null) {
   root.innerHTML = `
     <div class="app-shell">
       ${renderNav()}
+      ${renderGlobalBar()}
       <main class="main-content main-${activeView}" data-page="${activeView}">
-        ${renderGlobalBar()}
         ${customerExperience ? '<div class="customer-mode-banner"><span>客户能力验收体验 · 本地模拟数据</span><span><button class="text-button" data-return-customer>返回验收路径</button><button class="text-button" data-exit-customer>退出体验</button></span></div>' : ""}
         ${pages[activeView]()}
       </main>
@@ -899,6 +1082,21 @@ function render(root, focusSearch = null) {
     </div>
   `;
   if (activeView === "workbench") requestAnimationFrame(() => mountMineMap(root));
+  if (monitorModalOpen && monitorMode === "replay" && monitorReplay?.matched) requestAnimationFrame(() => {
+    const video = root.querySelector(".camera-video-wrap video");
+    if (!video) return;
+    const start = Number(video.dataset.clipStart);
+    const end = Number(video.dataset.clipEnd);
+    const seekStart = () => {
+      video.currentTime = start * video.duration;
+      video.play();
+    };
+    if (video.readyState >= 1) seekStart();
+    else video.addEventListener("loadedmetadata", seekStart, { once: true });
+    video.ontimeupdate = () => {
+      if (video.currentTime >= end * video.duration) video.pause();
+    };
+  });
   if (focusSearch) {
     const input = root.querySelector(`[data-search-for="${focusSearch.view}"]`);
     input?.focus();
@@ -932,6 +1130,7 @@ function selectView(root, view) {
     replayTimer = null;
   }
   activeView = view;
+  if (view !== "ai") aiDockView = "hidden";
   markCustomerVisited({ workbench: "discovery", audit: "evidence", vehicles: "archive", settlement: "settlement" }[view]);
   notice = "";
   if (view === "audit" && !sampleTrips.has(selectedTripId)) selectedTripId = seedTrips[0].id;
@@ -987,15 +1186,18 @@ function handleWorkflowSubmit(root, event) {
   if (event.target.matches("[data-chat-form]")) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.target).entries());
-    chatQuestion = String(values.question || "").trim();
-    const query = chatQuestion.toLocaleLowerCase();
-    const intent = query.includes("生成") && query.includes("报告") ? "report"
-      : (query.includes("车") || query.includes("运力") || query.includes("周转")) ? (query.includes("月") ? "vehicle-month-capacity" : "vehicle-capacity")
-      : query.includes("采矿") || query.includes("采区") || query.includes("采出") ? "production-trend"
-        : query.includes("卸") || query.includes("接收") ? "unload-trend"
-          : query.includes("异常") || query.includes("稽核") ? "anomaly-review"
-            : query.includes("今天") || query.includes("运输") || query.includes("趟") ? "daily-operation" : null;
-    selectedChat = intent;
+    const question = String(values.question || "").trim();
+    if (question) startChatQuery(root, question);
+    return;
+  }
+  if (event.target.matches("[data-camera-query]")) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target).entries());
+    const trip = sampleTrips.get(selectedTripId);
+    const start = timeToMinutes(values.start);
+    const end = timeToMinutes(values.end);
+    const matched = Boolean(trip && values.date === trip.occurredAt.slice(0, 10) && start >= timeToMinutes(trip.times.gross) && end <= timeToMinutes(trip.times.tare) && start < end);
+    monitorReplay = { ...values, searched: true, matched };
     render(root);
     return;
   }
@@ -1044,13 +1246,30 @@ function handleCaseAction(root, tripId, action) {
   render(root);
 }
 
-function downloadText(filename, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/markdown;charset=utf-8" }));
+function downloadContent(filename, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function reportDocument(report) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(report.title)}</title><style>body{font-family:Arial,'Microsoft YaHei',sans-serif;color:#172435;line-height:1.7;margin:32px}h1{font-size:24px;margin:20px 0 8px}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #dce3ea;padding-bottom:6px}.report-brand{color:#137c87;font-weight:bold}.report-brand span{float:right;color:#78879a;font-weight:normal}.report-meta{color:#687586;border-bottom:1px solid #dce3ea;padding-bottom:14px}.report-document{max-width:900px;margin:0 auto}li,p{font-size:12px}.report-kpis{display:flex;gap:10px}.report-kpis>div{flex:1;padding:10px;border:1px solid #dce3ea}.report-kpis span,.report-kpis strong{display:block}.report-kpis span{color:#718094;font-size:11px}.report-kpis strong{font-size:18px}.report-kpis small{font-size:11px}.report-chart svg{width:100%}.report-chart-legend{display:flex;gap:12px;font-size:10px}.report-chart-legend span{display:inline-flex;align-items:center;gap:4px}.report-chart-legend i{display:inline-block;width:8px;height:8px;border-radius:50%}.report-vehicle-chart{display:grid;gap:8px}.report-vehicle-bar{display:grid;grid-template-columns:90px 1fr 80px 44px;gap:8px;align-items:center}.report-vehicle-bar>div{height:8px;background:#eaf0f4}.report-vehicle-bar i{display:block;height:100%;background:#16a6b5}.report-table-wrap{overflow:visible}.report-document table{width:100%;border-collapse:collapse;font-size:10px}.report-document td,.report-document th{border:1px solid #dce3ea;padding:5px;text-align:left}.report-document td small{display:block;color:#78879a;font-size:8px}@media print{body{margin:14mm}}</style></head><body>${reportBodyHtml(report)}</body></html>`;
+}
+
+function printReport(report) {
+  const preview = window.open("", "_blank", "width=960,height=720");
+  if (!preview) {
+    notice = "浏览器拦截了打印窗口，请允许弹出窗口后重试";
+    return;
+  }
+  preview.document.open();
+  preview.document.write(reportDocument(report));
+  preview.document.close();
+  preview.focus();
+  setTimeout(() => preview.print(), 250);
 }
 
 function handleClick(root, event) {
@@ -1095,6 +1314,11 @@ function handleClick(root, event) {
     render(root);
     return;
   }
+  if (event.target.closest("[data-clear-map-vehicle]")) {
+    selectedMapPlate = null;
+    render(root);
+    return;
+  }
   const period = event.target.closest("[data-analytics-period]");
   if (period) {
     analyticsPeriod = period.dataset.analyticsPeriod;
@@ -1111,9 +1335,15 @@ function handleClick(root, event) {
   }
   const aiTab = event.target.closest("[data-ai-tab]");
   if (aiTab) {
-    aiContentTab = aiTab.dataset.aiTab;
+    aiDockView = "files";
     render(root);
     if (aiTab.dataset.aiTab === "files") root.querySelector("[data-file-upload]")?.click();
+    return;
+  }
+  const openAiDock = event.target.closest("[data-open-ai-dock]");
+  if (openAiDock) {
+    aiDockView = openAiDock.dataset.openAiDock;
+    render(root);
     return;
   }
   const sourceTrip = event.target.closest("[data-open-source-trip]");
@@ -1136,30 +1366,88 @@ function handleClick(root, event) {
   const prompt = event.target.closest("[data-chat-example]");
   if (prompt) {
     const item = operationsData.chatExamples.find((example) => example.intent === prompt.dataset.chatExample);
-    selectedChat = item?.intent || null;
-    chatQuestion = item?.question || "";
+    if (!item) return;
+    chatDraft = item.question;
+    selectedChat = item.intent;
     render(root);
+    root.querySelector("[data-chat-composer-input]")?.focus();
     return;
   }
   if (event.target.closest("[data-generate-report]")) {
-    const item = operationsData.chatExamples.find((example) => example.intent === selectedChat);
+    const item = chatAnswer?.resultType === "report-preview" ? chatAnswer : null;
     if (item) {
-      reports.unshift({ title: `${item.period} ${item.metric}报告`, createdAt: new Date().toLocaleString("zh-CN", { hour12: false }), origin: "平台示例数据", content: `# ${item.metric}报告\n\n范围：${item.period}\n\n口径：${item.metric}\n\n${item.answer}\n\n来源：${item.sources.join("；")}\n\n汇总来源：${(item.sourceRecordIds || []).join("、") || "无"}\n\n关联趟次：${(item.sourceTripIds || []).join("、") || "无"}` });
-      notice = "报告已生成，可下载 Markdown 文件";
+      const report = { title: "本月生产、运力与卸货趋势报告", createdAt: new Date().toLocaleString("zh-CN", { hour12: false }), origin: "平台示例数据", item: { ...item }, snapshot: buildReportSnapshot(item) };
+      reports.unshift(report);
+      reportPreview = report;
+      aiDockView = "report";
+      notice = "HTML 报告已生成";
     }
     render(root);
     return;
   }
-  const downloadReport = event.target.closest("[data-download-report]");
-  if (downloadReport) {
-    const report = reports[Number(downloadReport.dataset.downloadReport)];
-    if (report) downloadText(`${report.title}.md`, report.content);
+  const openReport = event.target.closest("[data-view-report]");
+  if (openReport) {
+    reportPreview = reports[Number(openReport.dataset.viewReport)] || null;
+    aiDockView = reportPreview ? "report" : "reports";
+    render(root);
     return;
   }
-  const downloadFile = event.target.closest("[data-download-file-report]");
-  if (downloadFile) {
-    const report = fileReports[Number(downloadFile.dataset.downloadFileReport)];
-    if (report) downloadText(`${report.name}-整理报告.md`, report.content);
+  const openFileReport = event.target.closest("[data-view-file-report]");
+  if (openFileReport) {
+    const report = fileReports[Number(openFileReport.dataset.viewFileReport)];
+    reportPreview = report ? { ...report, title: `${report.name} · 文件整理报告` } : null;
+    aiDockView = reportPreview ? "report" : "files";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-export-word]")) {
+    if (reportPreview) downloadContent(`${reportPreview.title}.doc`, reportDocument(reportPreview), "application/msword;charset=utf-8");
+    return;
+  }
+  if (event.target.closest("[data-print-report]")) {
+    if (reportPreview) printReport(reportPreview);
+    return;
+  }
+  if (event.target.closest("[data-close-report]")) {
+    aiDockView = "reports";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-close-ai-dock]")) {
+    aiDockView = "hidden";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-open-monitor]")) {
+    selectedTripId = event.target.closest("[data-open-monitor]").dataset.openMonitor;
+    monitorModalOpen = true;
+    monitorMode = "live";
+    monitorReplay = null;
+    render(root);
+    return;
+  }
+  const monitorModeButton = event.target.closest("[data-monitor-mode]");
+  if (monitorModeButton) {
+    monitorMode = monitorModeButton.dataset.monitorMode;
+    if (monitorMode === "replay" && !monitorReplay) {
+      const trip = sampleTrips.get(selectedTripId);
+      monitorReplay = { date: trip.occurredAt.slice(0, 10), start: trip.times.gross, end: trip.times.tare, searched: false, matched: false };
+    }
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-close-monitor]")) {
+    monitorModalOpen = false;
+    render(root);
+    return;
+  }
+  const cameraEvent = event.target.closest("[data-camera-event]");
+  if (cameraEvent) {
+    const video = root.querySelector(".camera-video-wrap video");
+    const trip = sampleTrips.get(selectedTripId);
+    const eventTime = trip.times[cameraEvent.dataset.cameraEvent];
+    video.currentTime = ((timeToMinutes(eventTime) - timeToMinutes(trip.times.gross)) / (timeToMinutes(trip.times.tare) - timeToMinutes(trip.times.gross))) * video.duration;
+    video.play();
     return;
   }
   if (event.target.closest("[data-confirm-upload]")) {
@@ -1216,11 +1504,8 @@ function handleClick(root, event) {
   }
   const replayStep = event.target.closest("[data-replay-step]");
   if (replayStep) {
-    const vehicles = operationsData.map.vehicles;
     replayActive = true;
-    replayProgress = (replayProgress + Number(replayStep.dataset.replayStep) * 0.08 + 1) % 1;
-    replayCursor = (replayCursor + Number(replayStep.dataset.replayStep) + vehicles.length) % vehicles.length;
-    selectedMapPlate = vehicles[replayCursor].plate;
+    replayProgress = Math.min(1, Math.max(0, replayProgress + Number(replayStep.dataset.replayStep) * 0.08));
     render(root);
     return;
   }
@@ -1330,6 +1615,11 @@ function renderApp(root) {
     render(root);
   });
   root.addEventListener("input", (event) => {
+    const chatInput = event.target.closest("[data-chat-composer-input]");
+    if (chatInput) {
+      chatDraft = chatInput.value;
+      return;
+    }
     const input = event.target.closest("[data-search-for]");
     if (!input) return;
     const view = input.dataset.searchFor;
