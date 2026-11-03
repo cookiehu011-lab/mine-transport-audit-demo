@@ -408,6 +408,9 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .map-legend .scale-dot { background: #35D5E4; }
 .map-legend .unload-dot { background: #F59E0B; }
 .map-legend .truck-dot { background: #FFC46E; }
+.map-legend .anomaly-dot { background: transparent; border: 2px solid #F59E0B; }
+.map-anomaly-tip { border: 1px solid #F59E0B !important; background: #FDEDD3 !important; color: #92400E !important; font-weight: 600; box-shadow: 0 4px 14px rgba(146, 64, 14, .25) !important; }
+.map-anomaly-tip::before { border-top-color: #F59E0B !important; }
 .map-scale { position: absolute; left: 14px; bottom: 14px; color: #A5B1C0; font-size: 10px; }
 .monitor-vehicle-list, .monitor-rail { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .monitor-vehicle-list { margin-top: 12px; overflow: hidden; }
@@ -643,7 +646,25 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .detail-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 14px; padding: 16px; }
 .detail-header, .route-section, .ai-advice, .evidence-section, .review-actions, .review-result, .audit-settlement-link { grid-column: 1 / -1; }
 .detail-header { align-items: flex-start; }
-.route-section { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, .7fr); gap: 12px; margin-top: 5px; padding: 12px 0; border-bottom: 1px solid #e7edf2; }
+.route-section { grid-template-columns: minmax(0, 1fr) minmax(200px, .62fr); gap: 12px; margin-top: 5px; padding: 12px 0; border-bottom: 1px solid #e7edf2; }
+.route-compare-card { min-width: 0; padding: 10px 12px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.route-compare-head, .route-compare-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 22px minmax(0, 1fr) 46px; align-items: center; gap: 8px; }
+.route-compare-head { padding-bottom: 7px; border-bottom: 1px solid #edf0f3; color: var(--muted); font-size: 10px; }
+.route-compare-head span:nth-child(2) { text-align: center; }
+.route-compare-head span:nth-child(4) { text-align: center; }
+.route-compare-head span:nth-child(5) { text-align: right; }
+.route-compare-row { padding: 6px 4px; border-bottom: 1px dashed #edf0f3; font-size: 11px; border-radius: 6px; }
+.route-compare-row:last-child { border-bottom: 0; }
+.route-compare-row.mismatch { background: #FFFBF3; }
+.rc-role { color: var(--muted); font-size: 10px; }
+.rc-node { padding: 4px 7px; border: 1px solid #C9DAF5; border-radius: 4px; background: #F5F9FF; color: #0B54E6; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.rc-node.actual { border-color: #C4E8E1; background: #F1FAF8; color: #0E7A6E; }
+.rc-node.actual.diff { border-color: #F59E0B; background: #FDEDD3; color: #92400E; font-weight: 700; }
+.rc-link { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; font-style: normal; font-size: 10px; font-weight: 700; }
+.rc-link.same { background: #E7F6F0; color: #0E7A6E; }
+.rc-link.diff { background: #FDEDD3; color: #92400E; }
+.rc-note { color: var(--muted); font-size: 10px; text-align: right; }
+.route-compare-row.mismatch .rc-note { color: #92400E; font-weight: 600; }
 .route-column { min-width: 0; }
 .route-column .route-points { flex-wrap: wrap; }
 .route-column.actual-route { padding-left: 12px; border-left: 1px solid #e8edf1; }
@@ -914,10 +935,12 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .analytics-breakdowns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
 .breakdown-card { min-width: 0; }
 .breakdown-list { display: grid; gap: 12px; padding: 12px 14px 15px; }
-.breakdown-row { display: grid; grid-template-columns: minmax(55px,68px) minmax(30px,1fr) 62px; align-items: center; gap: 6px; color: #4E6178; font-size: 10px; }
+.breakdown-row { display: grid; grid-template-columns: minmax(58px, auto) minmax(40px, 1fr) auto; align-items: center; gap: 8px; color: #4E6178; font-size: 10px; }
 .breakdown-row > span, .breakdown-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.breakdown-row > div { height: 8px; overflow: hidden; border-radius: 6px; background: #edf2f5; }
+.breakdown-row > div { min-width: 40px; height: 8px; overflow: hidden; border-radius: 6px; background: #edf2f5; }
 .breakdown-row > div i { display: block; height: 100%; border-radius: inherit; background: var(--cyan-chart); }
+/* 豁免：.unload-breakdown > div 的旧三列规则（原为每日卸点表设计）误伤行容器 */
+.unload-breakdown > .breakdown-list { grid-template-columns: 1fr; }
 .unload-breakdown .breakdown-row > div i { background: var(--amber); }
 .breakdown-row strong { color: #334a61; font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; }
 .capacity-tonnage { display: grid; gap: 5px; }

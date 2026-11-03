@@ -65,6 +65,7 @@ let mineMap = null;
 let mineMapElement = null;
 let mineMapVehicles = new Map();
 let mineMapRoutes = new Map();
+let mineMapAnomalyMarkers = null;
 let notice = "";
 let workflowForm = null;
 let aiFeedback = {}; // tripId -> { vote: "accurate" | "inaccurate", reason }
@@ -288,6 +289,7 @@ function mountMineMap(root) {
   }).on("tileload", () => {
     mapStatus.hidden = true;
   }).addTo(mineMap);
+  mineMapAnomalyMarkers = L.layerGroup().addTo(mineMap);
   operationsData.map.routes.forEach((route) => {
     const points = route.points.split(" ").map((pair) => {
       const [x, y] = pair.split(",").map(Number);
@@ -298,14 +300,16 @@ function mountMineMap(root) {
       return { x, y };
     })).map(mapCoordinate);
     const halo = L.polyline(smooth, { color: "#e3eaeb", weight: 8, opacity: 0.12, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
-    const line = L.polyline(smooth, { color: "#93A3B5", weight: 2.5, opacity: 0.52, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    // 未驶过段：灰蓝虚线（计划路线）；已驶过段由 syncMineMap 按车辆位置填充为青色实线
+    const remainingLine = L.polyline(smooth, { color: "#7C93AC", weight: 2.5, opacity: 0.62, dashArray: "7 8", lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const passedLine = L.polyline([], { color: "#22C3D2", weight: 3.5, opacity: 0.92, lineCap: "round", lineJoin: "round" }).addTo(mineMap);
     const middle = Math.floor(smooth.length / 2);
     const before = smooth[Math.max(0, middle - 2)];
     const after = smooth[Math.min(smooth.length - 1, middle + 2)];
     const angle = Math.atan2(-(after[0] - before[0]), after[1] - before[1]) * 180 / Math.PI;
     const arrow = L.marker(smooth[middle], { interactive: false, icon: routeArrowIcon(false, angle), zIndexOffset: 100 });
     arrow.addTo(mineMap);
-    mineMapRoutes.set(route.tripId, { halo, line, arrow, angle });
+    mineMapRoutes.set(route.tripId, { halo, line: passedLine, passedLine, remainingLine, smooth, arrow, angle });
   });
   operationsData.map.nodes.forEach((node) => {
     const marker = L.marker(mapCoordinate(node), {
@@ -318,6 +322,7 @@ function mountMineMap(root) {
     marker.bindTooltip(vehicle.plate, { permanent: true, direction: "top", offset: [0, -13], className: "map-truck-label" });
     marker.on("click", () => {
       selectedMapPlate = vehicle.plate;
+      monitorRailOpen = true; // 点击车辆 = 想看详情，主动展开右侧栏
       render(root);
     });
     mineMapVehicles.set(vehicle.plate, marker);
@@ -341,10 +346,23 @@ function syncMineMap() {
   const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
   operationsData.map.routes.forEach((route) => {
     const layers = mineMapRoutes.get(route.tripId);
+    if (!layers) return;
     const active = selected?.tripId === route.tripId;
-    layers?.halo.setStyle({ color: active ? "#33D6E4" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.1 });
-    layers?.line.setStyle(active ? { color: "#22C3D2", weight: 3.5, opacity: 0.88 } : { color: "#93A3B5", weight: 2.25, opacity: 0.44 });
-    layers?.arrow.setIcon(routeArrowIcon(active, layers.angle));
+    layers.halo.setStyle({ color: active ? "#33D6E4" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.08, dashArray: active ? null : "6 10" });
+    layers.remainingLine.setStyle(active ? { color: "#7C93AC", weight: 2.5, opacity: 0.66, dashArray: "7 8" } : { color: "#7C93AC", weight: 2, opacity: 0.42, dashArray: "7 9" });
+    layers.arrow.setIcon(routeArrowIcon(active, layers.angle));
+    // 已驶过段：把车辆当前位置投影到路线点列上，之前的点填充为青色实线
+    const vehicle = operationsData.map.vehicles.find((item) => item.tripId === route.tripId);
+    if (!vehicle) { layers.passedLine.setLatLngs([]); return; }
+    const pos = mapCoordinate(mapVehiclePosition(vehicle));
+    let splitIndex = 0;
+    let bestDistance = Infinity;
+    layers.smooth.forEach((point, index) => {
+      const distance = (point[0] - pos[0]) ** 2 + (point[1] - pos[1]) ** 2;
+      if (distance < bestDistance) { bestDistance = distance; splitIndex = index; }
+    });
+    layers.passedLine.setLatLngs(active ? layers.smooth.slice(0, splitIndex + 1).concat([pos]) : []);
+    layers.remainingLine.setLatLngs([pos].concat(layers.smooth.slice(splitIndex)));
   });
   operationsData.map.vehicles.forEach((vehicle) => {
     const position = mapVehiclePosition(vehicle);
@@ -352,13 +370,27 @@ function syncMineMap() {
     marker?.setLatLng(mapCoordinate(position));
     marker?.setIcon(truckMapIcon(selectedMapPlate === vehicle.plate));
   });
+  syncAnomalyMarkers();
+}
+
+function syncAnomalyMarkers() {
+  if (!mineMap || !mineMapAnomalyMarkers) return;
+  mineMapAnomalyMarkers.clearLayers();
+  getOpenAnomalies().forEach((trip) => {
+    if (trip.issue !== "卸货点不一致") return;
+    const node = operationsData.map.nodes.find((item) => item.label === trip.unloadRecord);
+    if (!node) return;
+    L.circleMarker(mapCoordinate(node), { radius: 8, color: "#F59E0B", weight: 2.5, fillColor: "#FDEDD3", fillOpacity: 0.95 })
+      .bindTooltip("实际卸货点 · 偏离计划", { permanent: true, direction: "top", offset: [0, -10], className: "map-anomaly-tip" })
+      .addTo(mineMapAnomalyMarkers);
+  });
 }
 
 function renderMineMap() {
   return `
     <section class="mine-map" aria-label="矿区模拟路线图">
       <div id="mine-map-canvas" class="mine-map-canvas" role="application" aria-label="交互式矿山地图，车辆和路线均为模拟数据"></div>
-      <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span></div>
+      <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span><span><i class="anomaly-dot"></i>偏航卸点</span></div>
       <div class="map-scale">${operationsData.map.locationLabel} · 示意路线 · 非现场 GPS</div>
     </section>
   `;
@@ -465,11 +497,25 @@ function aiAssessment(trip) {
 function renderRoute(trip) {
   const mismatch = routeMismatch(trip);
   const actualRoute = [...trip.plannedRoute.slice(0, -1), trip.unloadRecord];
-  const renderPoints = (points, anomaly) => points.map((point, index) => `<span class="${anomaly && index === points.length - 1 ? "anomaly-point" : ""}">${point}</span>`).join('<i aria-hidden="true"></i>');
+  const roleOf = (index, total) => (index === 0 ? "出发" : index === total - 1 ? "卸货" : `途经 ${index}`);
+  const rows = trip.plannedRoute.map((point, index) => {
+    const actual = actualRoute[index];
+    const same = point === actual;
+    const last = index === trip.plannedRoute.length - 1;
+    return `<div class="route-compare-row${same ? "" : " mismatch"}">
+      <span class="rc-role">${roleOf(index, trip.plannedRoute.length)}</span>
+      <span class="rc-node">${point}</span>
+      <i class="rc-link ${same ? "same" : "diff"}" aria-hidden="true">${same ? "✓" : "≠"}</i>
+      <span class="rc-node actual${same ? "" : " diff"}">${actual}</span>
+      <span class="rc-note">${same ? "一致" : "不一致"}</span>
+    </div>`;
+  }).join("");
   return `
     <section class="route-section ${mismatch ? "has-mismatch" : "match"}">
-      <div class="route-column"><span class="eyebrow">计划路线 <span class="example-label">示例</span></span><div class="route-points">${renderPoints(trip.plannedRoute, mismatch)}</div></div>
-      <div class="route-column actual-route"><span class="eyebrow">实际记录 <span class="example-label">示例</span></span><div class="route-points">${renderPoints(actualRoute, mismatch)}</div></div>
+      <div class="route-compare-card">
+        <div class="route-compare-head"><span>节点</span><span>计划路线</span><span></span><span>实际记录</span><span>比对</span></div>
+        ${rows}
+      </div>
       <div class="route-result ${mismatch ? "has-mismatch" : "match"}"><span class="eyebrow">${mismatch ? "路线不一致" : "路线一致"}</span><strong class="${mismatch ? "anomaly-value" : ""}">${trip.unloadRecord}</strong><span class="${mismatch ? "anomaly-caption" : ""}">${mismatch ? "计划卸点与卸货记录不同" : "卸货记录与计划相符"}</span></div>
     </section>
   `;
