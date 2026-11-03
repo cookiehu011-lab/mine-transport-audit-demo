@@ -978,6 +978,11 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .map-dest-pin { width: 0 !important; height: 0 !important; }
 .map-dest-pin .dest-dot { position: absolute; left: -6px; top: -6px; display: block; width: 12px; height: 12px; border: 2.5px solid #fff; border-radius: 50%; background: #8FA3B8; box-shadow: 0 1px 5px #0B142499; transition: background .18s ease, box-shadow .18s ease, left .18s ease, top .18s ease; }
 .map-dest-pin.active .dest-dot { left: -8px; top: -8px; width: 16px; height: 16px; border-width: 3px; background: #0FB5C6; box-shadow: 0 0 0 4px #0FB5C633, 0 2px 7px #0B1424bb; }
+.map-anomaly-ring, .map-anomaly-origin { width: 0 !important; height: 0 !important; }
+.map-anomaly-ring span { position: absolute; left: -14px; top: -14px; display: block; width: 28px; height: 28px; border: 3px solid #F59E0B; border-radius: 50%; background: #F59E0B2e; box-shadow: 0 0 0 2.5px #fff; animation: anomaly-pulse 1.8s ease-out infinite; }
+.map-anomaly-origin span { position: absolute; left: -6px; top: -6px; display: block; width: 12px; height: 12px; border: 2.5px solid #fff; border-radius: 50%; background: #F59E0B; box-shadow: 0 1px 4px #0B142499; }
+@keyframes anomaly-pulse { 0% { box-shadow: 0 0 0 2.5px #fff, 0 0 0 0 #F59E0B73; } 70% { box-shadow: 0 0 0 2.5px #fff, 0 0 0 14px #F59E0B00; } 100% { box-shadow: 0 0 0 2.5px #fff, 0 0 0 0 #F59E0B00; } }
+@media (prefers-reduced-motion: reduce) { .map-anomaly-ring span { animation: none; } }
 .map-load-error { position: absolute; z-index: 800; top: 56px; left: 14px; padding: 7px 10px; border: 1px solid #F0B24A; border-radius: 4px; background: #FFFAF0; color: #8A6420; font-size: 11px; }
 .answer-actions { flex-wrap: wrap; }
 .answer-table { overflow: hidden; margin: 10px 0; border: 1px solid #dfe8ee; border-radius: 6px; background: #fff; }

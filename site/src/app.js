@@ -393,13 +393,34 @@ function syncMineMap() {
 function syncAnomalyMarkers() {
   if (!mineMap || !mineMapAnomalyMarkers) return;
   mineMapAnomalyMarkers.clearLayers();
-  getOpenAnomalies().forEach((trip) => {
-    if (trip.issue !== "卸货点不一致") return;
-    const node = operationsData.map.nodes.find((item) => item.label === trip.unloadRecord);
-    if (!node) return;
-    L.circleMarker(mapCoordinate(node), { radius: 8, color: "#F59E0B", weight: 2.5, fillColor: "#FDEDD3", fillOpacity: 0.95 })
-      .bindTooltip("实际卸货点 · 偏离计划", { permanent: true, direction: "top", offset: [0, -10], className: "map-anomaly-tip" })
-      .addTo(mineMapAnomalyMarkers);
+  // 按「计划卸点→实际卸点」分组：多个趟次偏离相同时只画一套标记，避免重叠
+  const mismatches = getOpenAnomalies().filter((trip) => trip.issue === "卸货点不一致");
+  const grouped = new Map();
+  mismatches.forEach((trip) => {
+    const key = `${trip.plannedRoute.at(-1)}→${trip.unloadRecord}`;
+    grouped.set(key, (grouped.get(key) || []).concat(trip));
+  });
+  let tipIndex = 0;
+  grouped.forEach((trips, key) => {
+    const [plannedLabel, actualLabel] = key.split("→");
+    const plannedNode = operationsData.map.nodes.find((item) => item.label === plannedLabel);
+    const actualNode = operationsData.map.nodes.find((item) => item.label === actualLabel);
+    if (!actualNode) return;
+    if (plannedNode) {
+      // 偏离路径：白描边 + 橙色虚线，直观连接计划卸点与实际卸点
+      L.polyline([mapCoordinate(plannedNode), mapCoordinate(actualNode)], { color: "#ffffff", weight: 7, opacity: 0.9, lineCap: "round" }).addTo(mineMapAnomalyMarkers);
+      L.polyline([mapCoordinate(plannedNode), mapCoordinate(actualNode)], { color: "#F59E0B", weight: 3.5, opacity: 0.95, dashArray: "7 7", lineCap: "round" }).addTo(mineMapAnomalyMarkers);
+      L.marker(mapCoordinate(plannedNode), { interactive: false, icon: L.divIcon({ className: "map-anomaly-origin", html: "<span></span>", iconSize: [0, 0] }), zIndexOffset: 210 }).addTo(mineMapAnomalyMarkers);
+    }
+    L.marker(mapCoordinate(actualNode), {
+      interactive: false,
+      icon: L.divIcon({ className: "map-anomaly-ring", html: "<span></span>", iconSize: [0, 0] }),
+      zIndexOffset: 300,
+    }).bindTooltip(
+      trips.length > 1 ? `${trips.length} 趟实际卸在 ${actualLabel} · 计划 ${plannedLabel}` : `实际卸在 ${actualLabel} · 计划 ${plannedLabel}`,
+      { permanent: true, direction: "top", offset: [0, -20 - tipIndex * 26], className: "map-anomaly-tip" },
+    ).addTo(mineMapAnomalyMarkers);
+    tipIndex += 1;
   });
 }
 
