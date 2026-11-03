@@ -291,25 +291,28 @@ function mountMineMap(root) {
   }).addTo(mineMap);
   mineMapAnomalyMarkers = L.layerGroup().addTo(mineMap);
   operationsData.map.routes.forEach((route) => {
-    const points = route.points.split(" ").map((pair) => {
-      const [x, y] = pair.split(",").map(Number);
-      return mapCoordinate({ x, y });
-    });
     const smooth = smoothMapRoute(route.points.split(" ").map((pair) => {
       const [x, y] = pair.split(",").map(Number);
       return { x, y };
     })).map(mapCoordinate);
-    const halo = L.polyline(smooth, { color: "#e3eaeb", weight: 8, opacity: 0.12, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
-    // 未驶过段：灰蓝虚线（计划路线）；已驶过段由 syncMineMap 按车辆位置填充为青色实线
-    const remainingLine = L.polyline(smooth, { color: "#7C93AC", weight: 2.5, opacity: 0.62, dashArray: "7 8", lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
-    const passedLine = L.polyline([], { color: "#22C3D2", weight: 3.5, opacity: 0.92, lineCap: "round", lineJoin: "round" }).addTo(mineMap);
+    // 分层（自底向上）：glow（选中态青色光晕）→ halo（白描边）→ remaining（计划路线点状虚线）→ passed（已驶过青色粗实线）
+    const glow = L.polyline([], { color: "#00D5E0", weight: 14, opacity: 0, lineCap: "round", lineJoin: "round" }).addTo(mineMap);
+    const halo = L.polyline(smooth, { color: "#ffffff", weight: 8, opacity: 0.9, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const remainingLine = L.polyline(smooth, { color: "#8FA3B8", weight: 2.5, opacity: 0.55, dashArray: "2 10", lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const passedLine = L.polyline([], { color: "#0FB5C6", weight: 6, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(mineMap);
     const middle = Math.floor(smooth.length / 2);
     const before = smooth[Math.max(0, middle - 2)];
     const after = smooth[Math.min(smooth.length - 1, middle + 2)];
     const angle = Math.atan2(-(after[0] - before[0]), after[1] - before[1]) * 180 / Math.PI;
     const arrow = L.marker(smooth[middle], { interactive: false, icon: routeArrowIcon(false, angle), zIndexOffset: 100 });
     arrow.addTo(mineMap);
-    mineMapRoutes.set(route.tripId, { halo, line: passedLine, passedLine, remainingLine, smooth, arrow, angle });
+    // 路线终点端帽（纯圆点，不带文字——节点名已由 map-site-marker 标注）
+    const destinationPin = L.marker(smooth[smooth.length - 1], {
+      interactive: false,
+      icon: L.divIcon({ className: "map-dest-pin", html: '<span class="dest-dot"></span>', iconSize: [0, 0] }),
+      zIndexOffset: 220,
+    }).addTo(mineMap);
+    mineMapRoutes.set(route.tripId, { halo, glow, passedLine, remainingLine, smooth, arrow, angle, destinationPin });
   });
   operationsData.map.nodes.forEach((node) => {
     const marker = L.marker(mapCoordinate(node), {
@@ -348,12 +351,23 @@ function syncMineMap() {
     const layers = mineMapRoutes.get(route.tripId);
     if (!layers) return;
     const active = selected?.tripId === route.tripId;
-    layers.halo.setStyle({ color: active ? "#33D6E4" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.08, dashArray: active ? null : "6 10" });
-    layers.remainingLine.setStyle(active ? { color: "#7C93AC", weight: 2.5, opacity: 0.66, dashArray: "7 8" } : { color: "#7C93AC", weight: 2, opacity: 0.42, dashArray: "7 9" });
+    // 白描边：选中路线更粗更实，未选中保持细描边（导航地图同款「白边+彩线」）
+    layers.halo.setStyle(active
+      ? { color: "#ffffff", weight: 10, opacity: 0.95, dashArray: null }
+      : { color: "#ffffff", weight: 5.5, opacity: 0.72, dashArray: null });
+    layers.remainingLine.setStyle(active
+      ? { color: "#5E7690", weight: 3.5, opacity: 0.9, dashArray: "2 10" }
+      : { color: "#8FA3B8", weight: 2.5, opacity: 0.55, dashArray: "2 10" });
     layers.arrow.setIcon(routeArrowIcon(active, layers.angle));
-    // 已驶过段：把车辆当前位置投影到路线点列上，之前的点填充为青色实线
+    layers.destinationPin.getElement()?.classList.toggle("active", active);
+    // 已驶过段：把车辆当前位置投影到路线点列上，之前的点填充为青色实线（含光晕）
     const vehicle = operationsData.map.vehicles.find((item) => item.tripId === route.tripId);
-    if (!vehicle) { layers.passedLine.setLatLngs([]); return; }
+    if (!vehicle) {
+      layers.passedLine.setLatLngs([]);
+      layers.glow.setLatLngs([]);
+      layers.glow.setStyle({ opacity: 0 });
+      return;
+    }
     const pos = mapCoordinate(mapVehiclePosition(vehicle));
     let splitIndex = 0;
     let bestDistance = Infinity;
@@ -361,7 +375,10 @@ function syncMineMap() {
       const distance = (point[0] - pos[0]) ** 2 + (point[1] - pos[1]) ** 2;
       if (distance < bestDistance) { bestDistance = distance; splitIndex = index; }
     });
-    layers.passedLine.setLatLngs(active ? layers.smooth.slice(0, splitIndex + 1).concat([pos]) : []);
+    const passed = active ? layers.smooth.slice(0, splitIndex + 1).concat([pos]) : [];
+    layers.passedLine.setLatLngs(passed);
+    layers.glow.setLatLngs(passed);
+    layers.glow.setStyle({ opacity: active ? 0.2 : 0 });
     layers.remainingLine.setLatLngs([pos].concat(layers.smooth.slice(splitIndex)));
   });
   operationsData.map.vehicles.forEach((vehicle) => {
@@ -390,7 +407,7 @@ function renderMineMap() {
   return `
     <section class="mine-map" aria-label="矿区模拟路线图">
       <div id="mine-map-canvas" class="mine-map-canvas" role="application" aria-label="交互式矿山地图，车辆和路线均为模拟数据"></div>
-      <div class="map-legend"><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span><span><i class="anomaly-dot"></i>偏航卸点</span></div>
+      <div class="map-legend"><span><i class="route-done"></i>已驶过</span><span><i class="route-plan"></i>计划路线</span><span><i class="pit-dot"></i>采区</span><span><i class="scale-dot"></i>承重点</span><span><i class="unload-dot"></i>卸货点</span><span><i class="truck-dot"></i>车辆</span><span><i class="anomaly-dot"></i>偏航卸点</span></div>
       <div class="map-scale">${operationsData.map.locationLabel} · 示意路线 · 非现场 GPS</div>
     </section>
   `;

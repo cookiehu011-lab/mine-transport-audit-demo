@@ -405,6 +405,8 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .map-legend { position: absolute; right: 14px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 13px; padding: 9px 12px; border: 1px solid #506176aa; border-radius: 6px; background: #0B1424de; color: #d6e0e8; font-size: 11px; }
 .map-legend span { display: flex; align-items: center; gap: 6px; }
 .map-legend i { width: 8px; height: 8px; border: 1px solid #fff8; border-radius: 50%; background: #2BD9A0; }
+.map-legend .route-done, .map-legend .route-plan { width: 16px; height: 0; border: 0; border-top: 3px solid #0FB5C6; border-radius: 2px; }
+.map-legend .route-plan { border-top-style: dotted; border-top-color: #8FA3B8; }
 .map-legend .scale-dot { background: #35D5E4; }
 .map-legend .unload-dot { background: #F59E0B; }
 .map-legend .truck-dot { background: #FFC46E; }
@@ -973,6 +975,9 @@ body { background: var(--canvas); color: var(--ink); font-size: 14px; }
 .map-truck-symbol.selected svg { filter: drop-shadow(0 0 5px #00D5E0) drop-shadow(0 2px 2px #09131eaa); }
 .map-truck-label { border: 0 !important; background: #101F33e8 !important; color: #f5fafb !important; font-size: 11px; font-weight: 650; }
 .map-truck-label::before { border-top-color: #101F33e8 !important; }
+.map-dest-pin { width: 0 !important; height: 0 !important; }
+.map-dest-pin .dest-dot { position: absolute; left: -6px; top: -6px; display: block; width: 12px; height: 12px; border: 2.5px solid #fff; border-radius: 50%; background: #8FA3B8; box-shadow: 0 1px 5px #0B142499; transition: background .18s ease, box-shadow .18s ease, left .18s ease, top .18s ease; }
+.map-dest-pin.active .dest-dot { left: -8px; top: -8px; width: 16px; height: 16px; border-width: 3px; background: #0FB5C6; box-shadow: 0 0 0 4px #0FB5C633, 0 2px 7px #0B1424bb; }
 .map-load-error { position: absolute; z-index: 800; top: 56px; left: 14px; padding: 7px 10px; border: 1px solid #F0B24A; border-radius: 4px; background: #FFFAF0; color: #8A6420; font-size: 11px; }
 .answer-actions { flex-wrap: wrap; }
 .answer-table { overflow: hidden; margin: 10px 0; border: 1px solid #dfe8ee; border-radius: 6px; background: #fff; }
