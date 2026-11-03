@@ -67,6 +67,9 @@ let mineMapVehicles = new Map();
 let mineMapRoutes = new Map();
 let notice = "";
 let workflowForm = null;
+let aiFeedback = {}; // tripId -> { vote: "accurate" | "inaccurate", reason }
+let feedbackOpenTripId = null;
+let monitorRailOpen = null; // null=按视口默认（宽屏展开/窄屏收起）；true/false=用户显式切换
 
 const formatWeight = (value) => Number(value).toFixed(2);
 const timeToMinutes = (value) => value.split(":").map(Number).reduce((hours, part) => hours * 60 + part);
@@ -247,10 +250,10 @@ function routeArrowIcon(selected, angle = 0) {
 }
 
 function truckMapIcon(selected) {
-  const color = selected ? "#13bac7" : "#8495a6";
+  const color = selected ? "#00D5E0" : "#8295AB";
   return L.divIcon({
     className: "map-truck-marker",
-    html: `<span class="map-truck-symbol ${selected ? "selected" : ""}"><svg viewBox="0 0 32 24" aria-hidden="true"><path d="M2 4h18v13H2zM20 8h6l4 5v4h-10z" fill="${color}"/><path d="M21 9h4l3 4h-7z" fill="#d9f8fa"/><circle cx="8" cy="19" r="3"/><circle cx="24" cy="19" r="3"/></svg></span>`,
+    html: `<span class="map-truck-symbol ${selected ? "selected" : ""}"><svg viewBox="0 0 32 24" aria-hidden="true"><path d="M2 4h18v13H2zM20 8h6l4 5v4h-10z" fill="${color}"/><path d="M21 9h4l3 4h-7z" fill="#CFF7FB"/><circle cx="8" cy="19" r="3"/><circle cx="24" cy="19" r="3"/></svg></span>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17],
   });
@@ -295,7 +298,7 @@ function mountMineMap(root) {
       return { x, y };
     })).map(mapCoordinate);
     const halo = L.polyline(smooth, { color: "#e3eaeb", weight: 8, opacity: 0.12, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
-    const line = L.polyline(smooth, { color: "#91a7ad", weight: 2.5, opacity: 0.52, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
+    const line = L.polyline(smooth, { color: "#93A3B5", weight: 2.5, opacity: 0.52, lineCap: "round", lineJoin: "round", smoothFactor: 1.2 }).addTo(mineMap);
     const middle = Math.floor(smooth.length / 2);
     const before = smooth[Math.max(0, middle - 2)];
     const after = smooth[Math.min(smooth.length - 1, middle + 2)];
@@ -319,6 +322,17 @@ function mountMineMap(root) {
     });
     mineMapVehicles.set(vehicle.plate, marker);
   });
+  // 默认视野：完整容纳全部采区/承重/卸货节点、路线与车辆
+  const bounds = L.latLngBounds();
+  operationsData.map.nodes.forEach((node) => bounds.extend(mapCoordinate(node)));
+  operationsData.map.routes.forEach((route) => {
+    route.points.split(" ").forEach((pair) => {
+      const [x, y] = pair.split(",").map(Number);
+      bounds.extend(mapCoordinate({ x, y }));
+    });
+  });
+  operationsData.map.vehicles.forEach((vehicle) => bounds.extend(mapCoordinate(vehicle)));
+  if (bounds.isValid()) mineMap.fitBounds(bounds, { padding: [26, 26] });
   syncMineMap();
 }
 
@@ -328,8 +342,8 @@ function syncMineMap() {
   operationsData.map.routes.forEach((route) => {
     const layers = mineMapRoutes.get(route.tripId);
     const active = selected?.tripId === route.tripId;
-    layers?.halo.setStyle({ color: active ? "#5ec4c9" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.1 });
-    layers?.line.setStyle(active ? { color: "#53b8bf", weight: 3.5, opacity: 0.88 } : { color: "#91a7ad", weight: 2.25, opacity: 0.44 });
+    layers?.halo.setStyle({ color: active ? "#33D6E4" : "#e3eaeb", weight: active ? 10 : 7, opacity: active ? 0.2 : 0.1 });
+    layers?.line.setStyle(active ? { color: "#22C3D2", weight: 3.5, opacity: 0.88 } : { color: "#93A3B5", weight: 2.25, opacity: 0.44 });
     layers?.arrow.setIcon(routeArrowIcon(active, layers.angle));
   });
   operationsData.map.vehicles.forEach((vehicle) => {
@@ -354,16 +368,20 @@ function renderMonitorVehicle(vehicle) {
   return `<button class="monitor-vehicle ${selectedMapPlate === vehicle.plate ? "selected" : ""}" data-map-vehicle="${vehicle.plate}"><span class="monitor-vehicle-icon">${icon("vehicles")}</span><span><strong>${vehicle.plate}</strong><small>${vehicle.tripId} · ${vehicle.status}</small></span><span class="vehicle-last-seen">${vehicle.lastLocated.slice(11)}</span></button>`;
 }
 
+function railExpanded() {
+  if (monitorRailOpen === null) return window.innerWidth > 1280;
+  return monitorRailOpen;
+}
+
 function renderWorkbench() {
   const open = getOpenAnomalies();
   const selected = operationsData.map.vehicles.find((vehicle) => vehicle.plate === selectedMapPlate);
   const trips = seedTrips.filter((trip) => matchesTrip(trip, searchValues.workbench, [(item) => item.id, (item) => item.plate]));
   return `
-    ${renderPageHeader("运营监控")}<div class="monitor-page"><div class="monitor-page-toolbar"><div><span class="simulation-pill">模拟回放</span><span>2026-04-01 · 示例矿区</span></div><div class="monitor-playback"><button class="icon-button" data-replay-step="-1" aria-label="上一步">‹</button><button class="button primary" data-replay-toggle>${replayPlaying ? "Ⅱ 暂停回放" : "▷ 模拟回放"}</button><input aria-label="回放进度" type="range" min="0" max="100" value="${replayProgress * 100}" data-replay-seek/><span>13:05—14:52</span><button class="icon-button" data-replay-step="1" aria-label="下一步">›</button><span class="replay-speed">1×</span></div></div><div class="monitor-layout"><div class="monitor-map-column">${renderMineMap()}</div>
-      <aside class="monitor-rail">${selected ? `<section class="selected-vehicle-detail"><div class="rail-heading"><div><span>选中车辆</span><strong>${selected.plate}</strong></div><button class="icon-button" data-clear-map-vehicle aria-label="关闭车辆详情">×</button></div><div class="vehicle-rail-data"><div><span>当前趟次</span><button class="text-button" data-open-trip="${selected.tripId}">${selected.tripId} ›</button></div><div><span>运行状态</span><strong>${selected.status}</strong></div><div><span>计划路径</span><strong>${selected.route.join(" → ")}</strong></div><div><span>最后位置</span><strong>${selected.lastLocated}</strong></div></div><button class="button secondary rail-action" data-open-vehicle="${selected.plate}">查看车辆档案</button></section>` : '<div class="vehicle-select-empty"><span class="empty-map-glyph">⌖</span><strong>全矿区视图</strong><span>选择地图车辆查看趟次与运行状态</span></div>'}
-        <div class="rail-divider"></div><div class="section-heading"><h3>AI异常线索</h3><span>${open.length} 项</span></div>${open.length ? open.map((trip) => `<button class="monitor-alert" data-open-trip="${trip.id}"><span class="alert-mark">!</span><span><strong>${trip.issue}</strong><small>${trip.id} · ${trip.plate}</small><em>${escapeHtml(eventText(trip))}</em></span><b>查看 ›</b></button>`).join("") : '<div class="empty-state">当前没有待复核线索</div>'}
+    ${renderPageHeader("运营监控")}<div class="monitor-page"><div class="monitor-page-toolbar"><div><span class="simulation-pill">模拟回放</span><span>2026-04-01 · 示例矿区</span></div><div class="monitor-playback"><button class="icon-button" data-replay-step="-1" aria-label="上一步">‹</button><button class="button primary" data-replay-toggle>${replayPlaying ? "Ⅱ 暂停回放" : "▷ 模拟回放"}</button><input aria-label="回放进度" type="range" min="0" max="100" value="${replayProgress * 100}" data-replay-seek/><span>13:05—14:52</span><button class="icon-button" data-replay-step="1" aria-label="下一步">›</button><span class="replay-speed">1×</span></div><div class="monitor-search">${renderSearch("workbench", "搜索车牌或趟次")}${searchValues.workbench.trim() ? `<div class="search-results-panel">${trips.map(renderWorkbenchRow).join("") || '<div class="empty-state">没有匹配记录</div>'}</div>` : ""}</div><button class="rail-toggle" data-toggle-rail aria-expanded="${railExpanded()}">${railExpanded() ? "‹ 收起侧栏" : `异常线索<span class="rail-toggle-count">${open.length}</span>›`}</button></div><div class="monitor-layout${railExpanded() ? "" : " rail-collapsed"}"><div class="monitor-map-column">${renderMineMap()}</div>
+      <aside class="monitor-rail${railExpanded() ? " open" : ""}"><section class="rail-block"><div class="rail-heading"><div><span>${selected ? "选中车辆" : "车辆详情"}</span>${selected ? `<strong>${selected.plate}</strong>` : ""}</div>${selected ? '<button class="icon-button" data-clear-map-vehicle aria-label="关闭车辆详情">×</button>' : ""}</div>${selected ? `<div class="vehicle-rail-data"><div><span>当前趟次</span><button class="text-button" data-open-trip="${selected.tripId}">${selected.tripId} ›</button></div><div><span>运行状态</span><strong>${selected.status}</strong></div><div><span>计划路径</span><strong>${selected.route.join(" → ")}</strong></div><div><span>最后位置</span><strong>${selected.lastLocated}</strong></div></div><button class="button secondary rail-action" data-open-vehicle="${selected.plate}">查看车辆档案</button>` : '<div class="vehicle-select-empty compact"><span>点击地图上的车辆，查看趟次与运行状态</span></div>'}</section>
+        <section class="rail-block"><div class="section-heading"><h3>AI异常线索</h3><span>${open.length} 项</span></div>${open.length ? open.map((trip) => `<button class="monitor-alert" data-open-trip="${trip.id}"><span class="alert-mark">!</span><span><strong>${trip.issue}</strong><small>${trip.id} · ${trip.plate}</small><em>${escapeHtml(eventText(trip))} · ${confidenceInfo(trip).short}</em></span><b>查看 ›</b></button>`).join("") : '<div class="empty-state">当前没有待复核线索</div>'}</section>
       </aside></div>
-    <div class="monitor-search">${renderSearch("workbench", "搜索车牌或趟次")}${searchValues.workbench.trim() ? `<div class="search-results-panel">${trips.map(renderWorkbenchRow).join("") || '<div class="empty-state">没有匹配记录</div>'}</div>` : ""}</div>
     </div>
   `;
 }
@@ -410,6 +428,12 @@ function routeMismatch(trip) {
 
 function tareDeviation(trip) {
   return Number((trip.tareWeight - trip.tareMean).toFixed(2));
+}
+
+function confidenceInfo(trip) {
+  const value = Number(trip.confidence) || 0;
+  const tier = value >= 90 ? "高" : value >= 70 ? "中" : "低";
+  return { value, tier, text: `置信度${tier} · ${value}%`, short: `置信 ${value}%`, low: value < 70 };
 }
 
 function aiAssessment(trip) {
@@ -498,18 +522,23 @@ function renderEvidence(trip) {
 
 function renderAiAdvice(trip) {
   const assessment = aiAssessment(trip);
+  const confidence = confidenceInfo(trip);
   const status = getStatus(trip);
   const passResult = assessment.kind === "pass"
     ? `<div class="ai-review-sequence"><span>AI建议通过</span><b>→</b><span>${status === "verified" ? "人工核实通过" : "待人工核实"}</span></div>`
     : "";
+  const basisSources = assessment.kind === "anomaly" && trip.issue === "皮重波动异常"
+    ? ["路线记录", "称重记录", "近 30 天均值"]
+    : ["路线记录", "车辆影像", "称重记录"];
   return `
     <section class="ai-advice ${assessment.kind}">
       <div class="ai-advice-head"><div><span class="ai-mark">AI</span><h3>稽核建议</h3><span class="example-label">示例</span></div><span class="ai-review-state"><small>人工结论</small>${statusPill(status)}</span></div>
       <span class="ai-finding ${assessment.kind}">${assessment.finding}</span>
       <strong class="ai-recommendation">${assessment.heading}</strong>
-      <p>${assessment.reason}</p>
+      <span class="ai-confidence">${confidence.text}</span>
+      <p>${assessment.reason}${confidence.low ? `<em class="ai-confidence-hint">置信度偏低，建议以人工核对为准。</em>` : ""}</p>
       ${passResult}
-      <div class="evidence-links"><span>路线记录</span><span>车辆影像</span><span>称重记录</span></div>
+      <div class="evidence-links"><span class="evidence-label">判定依据</span>${basisSources.map((s) => `<span>${s}</span>`).join("")}</div>
     </section>
   `;
 }
@@ -547,12 +576,29 @@ function renderFollowUpPanel(trip) {
   `;
 }
 
+function renderAiFeedbackBar(trip) {
+  if (aiAssessment(trip).kind !== "anomaly") return "";
+  const feedback = aiFeedback[trip.id];
+  if (feedback) {
+    const verdict = feedback.vote === "accurate" ? "AI 判定准确" : "AI 判定有误";
+    return `<div class="ai-feedback submitted"><span class="ai-feedback-label">人工反馈</span><span>${verdict}${feedback.reason ? ` · 理由：${escapeHtml(feedback.reason)}` : ""}</span></div>`;
+  }
+  if (feedbackOpenTripId === trip.id) {
+    const reasons = trip.issue === "皮重波动异常"
+      ? ["属正常装载差异", "计量设备误差", "历史均值数据不足"]
+      : ["两卸点实为同一卸区", "计划已临时变更未同步", "定位或记录误差"];
+    return `<div class="ai-feedback open"><span class="ai-feedback-label">本次 AI 判定不准确，主要原因是</span><div class="ai-feedback-reasons">${reasons.map((reason) => `<button class="button secondary" data-feedback-reason="${reason}" data-trip="${trip.id}">${reason}</button>`).join("")}</div><form class="workflow-form compact" data-feedback-form data-trip="${trip.id}"><label>其他（补充说明，选填）<textarea name="reason"></textarea></label><div><button class="button primary" type="submit">提交反馈</button><button class="button secondary" type="button" data-cancel-feedback>取消</button></div></form></div>`;
+  }
+  return `<div class="ai-feedback"><span class="ai-feedback-label">本次 AI 判定是否准确？</span><div class="ai-feedback-actions"><button class="button secondary" data-feedback-vote="accurate" data-trip="${trip.id}">准确</button><button class="button secondary" data-feedback-vote="inaccurate" data-trip="${trip.id}">不准确</button></div></div>`;
+}
+
 function renderReviewActions(trip) {
   const status = getStatus(trip);
   const followUp = getFollowUp(trip);
-  if (status === "confirmedAnomaly") return renderFollowUpPanel(trip);
+  if (status === "confirmedAnomaly") return `${renderFollowUpPanel(trip)}${renderAiFeedbackBar(trip)}`;
   if (status === "verified") {
-    return `<div class="review-result"><span class="status ${status}">${statusLabels[status]}</span><span>人工复核结果 · 示例</span></div>${renderFollowUpPanel(trip)}`;
+    // 反馈条置于 sticky 复核结果栏之前，避免被吸底栏遮挡
+    return `${renderAiFeedbackBar(trip)}<div class="review-result"><span class="status ${status}">${statusLabels[status]}</span><span>人工复核结果 · 示例</span></div>${renderFollowUpPanel(trip)}`;
   }
   const supplementAwaiting = followUp.type === "supplement" && followUp.progress === "awaitingSupplement";
   const activeForm = workflowForm?.tripId === trip.id ? renderWorkflowForm(trip, workflowForm.type) : "";
@@ -911,13 +957,13 @@ function renderChatAnswer(item) {
     action = '<button class="button secondary" data-view="analytics">查看卸货趋势</button>';
   } else if (chatState === "complete" && item.resultType === "anomaly-list") {
     const anomalies = getOpenAnomalies();
-    detail = `<div class="answer-note anomaly-note">${anomalies.length} 条待复核线索 · AI提示不等于违规结论</div><div class="answer-anomalies">${anomalies.map((trip) => `<button data-open-trip="${trip.id}"><span><strong>${escapeHtml(trip.issue)}</strong><small>${trip.id} · ${trip.plate} · ${trip.occurredAt.replace("T", " ")}</small></span><span>${escapeHtml(eventText(trip))}</span><b>查看 ›</b></button>`).join("") || '<div class="empty-state">当前没有待复核异常线索</div>'}</div>`;
+    detail = `<div class="answer-note anomaly-note">${anomalies.length} 条待复核线索 · AI提示不等于违规结论</div><div class="answer-anomalies">${anomalies.map((trip) => `<button data-open-trip="${trip.id}"><span><strong>${escapeHtml(trip.issue)}</strong><small>${trip.id} · ${trip.plate} · ${confidenceInfo(trip).short} · ${trip.occurredAt.replace("T", " ")}</small></span><span>${escapeHtml(eventText(trip))}</span><b>查看 ›</b></button>`).join("") || '<div class="empty-state">当前没有待复核异常线索</div>'}</div>`;
     action = '<button class="button secondary" data-view="audit">进入运输稽核</button>';
   } else if (chatState === "complete" && item.resultType === "report-preview") {
     detail = `<div class="report-preview"><strong>本月运营报告</strong><span>28 天趋势 · 四车运力对比 · 每日指标与来源</span><small>范围：${item.period} · 示例数据</small></div>`;
     action = '<button class="button primary" data-generate-report>生成报告</button>';
   }
-  return `<article class="chat-answer answer-${item.resultType}"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>${escapeHtml(item.question)}</strong><small>${item.period} · 示例数据 · 演示响应</small></div></div><p data-answer-copy>${escapeHtml(streaming ? chatStreamText : item.answer)}${streaming ? '<i class="stream-caret" aria-hidden="true"></i>' : ""}</p>${detail}${chatState === "complete" ? `<div class="answer-scope"><div><span>指标口径</span><strong>${escapeHtml(item.metric)}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${escapeHtml(source)}</small>`).join("") || "<small>未查询平台数据</small>"}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}${action ? `<div class="answer-actions">${action}</div>` : ""}` : ""}</article>`;
+  return `<article class="chat-answer answer-${item.resultType}"><div class="answer-heading"><span class="ai-avatar">AI</span><div><strong>${escapeHtml(item.question)}</strong><small>${item.period} · 示例数据 · 演示响应</small></div>${chatState === "complete" ? '<div class="answer-tools"><button class="text-button" data-copy-answer>复制</button><button class="text-button" data-regenerate>重新生成</button></div>' : ""}</div><p data-answer-copy>${escapeHtml(streaming ? chatStreamText : item.answer)}${streaming ? '<i class="stream-caret" aria-hidden="true"></i>' : ""}</p>${detail}${chatState === "complete" ? `<div class="answer-scope"><div><span>指标口径</span><strong>${escapeHtml(item.metric)}</strong></div></div><div class="answer-sources"><span>数据来源</span>${item.sources.map((source) => `<small>${escapeHtml(source)}</small>`).join("") || "<small>未查询平台数据</small>"}</div>${item.sourceTripIds?.length ? `<div class="source-links">${renderSourceButtons(item.sourceTripIds)}</div>` : ""}${item.sourceRecordIds?.length ? `<div class="source-links">${renderMetricSourceButtons(item.sourceRecordIds)}</div>` : ""}${selectedSourceId ? renderSourceRecord(selectedSourceId) : ""}${action ? `<div class="answer-actions">${action}</div>` : ""}` : ""}</article>`;
 }
 
 function renderFilePreview() {
@@ -932,7 +978,7 @@ function renderAiWorkbench() {
     <div class="ai-workspace ${aiDockView === "hidden" ? "" : "has-side-panel"}"><section class="chat-column"><div class="chat-heading"><div><h2>矿山运营问答</h2><span>查运营数据、追溯来源、生成报告</span></div><div class="chat-heading-actions"><button class="button secondary" data-open-ai-dock="reports">历史报告 <b>${reports.length}</b></button><button class="button secondary" data-open-ai-dock="files">文件解析 <b>${fileReports.length + (pendingUpload ? 1 : 0)}</b></button><span class="ai-status"><i></i>示例数据</span></div></div>
       <div class="chat-prompts">${operationsData.chatExamples.map((example) => `<button class="prompt-button ${selectedChat === example.intent ? "selected" : ""}" data-chat-example="${example.intent}">${example.question}<span>↗</span></button>`).join("")}</div>
       <div class="chat-conversation">${chatQuestion ? `<div class="user-question">${escapeHtml(chatQuestion)}</div>` : `<div class="conversation-empty">${chatDraft ? "问题已回填，点击查询开始分析。" : "选择一个问题，或输入矿山运营问题。"}</div>`}${chatState === "thinking" ? '<div class="ai-thinking"><span class="ai-avatar">AI</span><div><strong>正在分析问题</strong><small>识别矿区、时间范围与数据口径</small><i><b></b><b></b><b></b></i></div></div>' : renderChatAnswer(item)}</div>
-      <form class="chat-composer" data-chat-form><input name="question" data-chat-composer-input value="${escapeHtml(chatDraft)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="composer-file" type="button" data-ai-tab="files" aria-label="上传文件">＋</button><button class="button primary" type="submit">查询</button></form>
+      <form class="chat-composer" data-chat-form><input name="question" data-chat-composer-input value="${escapeHtml(chatDraft)}" placeholder="询问矿山运营数据…" aria-label="输入矿山运营问题"/><button class="composer-file" type="button" data-ai-tab="files" aria-label="上传文件">＋</button>${chatState === "streaming" || chatState === "thinking" ? '<button class="button primary" type="button" data-stop-chat>■ 停止</button>' : '<button class="button primary" type="submit">查询</button>'}</form>
     </section>${renderAiSidePanel()}</div>
   `;
 }
@@ -990,12 +1036,12 @@ function buildReportSnapshot(item) {
 }
 
 function renderReportDailyChart(rows) {
-  const series = [{ key: "minedTons", name: "采矿量", color: "#16a6b5" }, { key: "verifiedTransportTons", name: "核实运输净重", color: "#3478d4" }, { key: "receivedUnloadTons", name: "卸点接收量", color: "#c77d36" }];
+  const series = [{ key: "minedTons", name: "采矿量", color: "#0FB5C6" }, { key: "verifiedTransportTons", name: "核实运输净重", color: "#1E6FFF" }, { key: "receivedUnloadTons", name: "卸点接收量", color: "#F59E0B" }];
   const max = Math.max(...rows.flatMap((row) => series.map((entry) => row[entry.key])));
   const x = (index) => 58 + index * 510 / Math.max(1, rows.length - 1);
   const y = (value) => 162 - value / max * 126;
   const labels = rows.filter((_, index) => index % 4 === 0 || index === rows.length - 1);
-  return `<div class="report-chart"><div class="report-chart-legend">${series.map((entry) => `<span><i style="background:${entry.color}"></i>${entry.name}</span>`).join("")}<small>吨 · 28 天示例</small></div><svg viewBox="0 0 600 210" role="img" aria-label="28天采矿量、核实运输净重和卸点接收量趋势图"><path d="M58 36H568M58 78H568M58 120H568M58 162H568" stroke="#e5ebf0" fill="none"/><g fill="#8795a4" font-size="9"><text x="7" y="39">${Math.round(max)}</text><text x="7" y="81">${Math.round(max * .67)}</text><text x="7" y="123">${Math.round(max * .33)}</text><text x="36" y="165">0</text></g>${series.map((entry) => `<polyline points="${rows.map((row, index) => `${x(index)},${y(row[entry.key])}`).join(" ")}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`).join("")}${labels.map((row) => { const index = rows.indexOf(row); return `<text x="${x(index)}" y="190" text-anchor="middle" fill="#708093" font-size="10">${row.date.slice(5)}</text>`; }).join("")}</svg></div>`;
+  return `<div class="report-chart"><div class="report-chart-legend">${series.map((entry) => `<span><i style="background:${entry.color}"></i>${entry.name}</span>`).join("")}<small>吨 · 28 天示例</small></div><svg viewBox="0 0 600 210" role="img" aria-label="28天采矿量、核实运输净重和卸点接收量趋势图"><path d="M58 36H568M58 78H568M58 120H568M58 162H568" stroke="#e5ebf0" fill="none"/><g fill="#8295AB" font-size="10"><text x="7" y="39">${Math.round(max)}</text><text x="7" y="81">${Math.round(max * .67)}</text><text x="7" y="123">${Math.round(max * .33)}</text><text x="36" y="165">0</text></g>${series.map((entry) => `<polyline points="${rows.map((row, index) => `${x(index)},${y(row[entry.key])}`).join(" ")}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`).join("")}${labels.map((row) => { const index = rows.indexOf(row); return `<text x="${x(index)}" y="190" text-anchor="middle" fill="#6B7E95" font-size="10">${row.date.slice(5)}</text>`; }).join("")}</svg></div>`;
 }
 
 function renderReportVehicleChart(rows) {
@@ -1082,6 +1128,18 @@ function render(root, focusSearch = null) {
     </div>
   `;
   if (activeView === "workbench") requestAnimationFrame(() => mountMineMap(root));
+  // 窄屏导航溢出提示（渐隐右缘；滚动到末尾时移除）
+  requestAnimationFrame(() => {
+    const topNav = root.querySelector(".platform-nav-shell nav");
+    if (!topNav) return;
+    const updateNavHint = () => {
+      const overflow = topNav.scrollWidth > topNav.clientWidth + 2;
+      const atEnd = topNav.scrollLeft + topNav.clientWidth >= topNav.scrollWidth - 2;
+      topNav.classList.toggle("is-scrollable", overflow && !atEnd);
+    };
+    updateNavHint();
+    topNav.addEventListener("scroll", updateNavHint, { passive: true });
+  });
   if (monitorModalOpen && monitorMode === "replay" && monitorReplay?.matched) requestAnimationFrame(() => {
     const video = root.querySelector(".camera-video-wrap video");
     if (!video) return;
@@ -1183,6 +1241,17 @@ function handleReview(root, tripId, action) {
 }
 
 function handleWorkflowSubmit(root, event) {
+  if (event.target.matches("[data-feedback-form]")) {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target).entries());
+    const tripId = event.target.dataset.trip;
+    const reason = String(values.reason || "").trim() || "其他";
+    aiFeedback[tripId] = { vote: "inaccurate", reason };
+    feedbackOpenTripId = null;
+    notice = "反馈已记录，AI 判定将参考人工结论优化（演示）";
+    render(root);
+    return;
+  }
   if (event.target.matches("[data-chat-form]")) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.target).entries());
@@ -1256,7 +1325,7 @@ function downloadContent(filename, content, type) {
 }
 
 function reportDocument(report) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(report.title)}</title><style>body{font-family:Arial,'Microsoft YaHei',sans-serif;color:#172435;line-height:1.7;margin:32px}h1{font-size:24px;margin:20px 0 8px}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #dce3ea;padding-bottom:6px}.report-brand{color:#137c87;font-weight:bold}.report-brand span{float:right;color:#78879a;font-weight:normal}.report-meta{color:#687586;border-bottom:1px solid #dce3ea;padding-bottom:14px}.report-document{max-width:900px;margin:0 auto}li,p{font-size:12px}.report-kpis{display:flex;gap:10px}.report-kpis>div{flex:1;padding:10px;border:1px solid #dce3ea}.report-kpis span,.report-kpis strong{display:block}.report-kpis span{color:#718094;font-size:11px}.report-kpis strong{font-size:18px}.report-kpis small{font-size:11px}.report-chart svg{width:100%}.report-chart-legend{display:flex;gap:12px;font-size:10px}.report-chart-legend span{display:inline-flex;align-items:center;gap:4px}.report-chart-legend i{display:inline-block;width:8px;height:8px;border-radius:50%}.report-vehicle-chart{display:grid;gap:8px}.report-vehicle-bar{display:grid;grid-template-columns:90px 1fr 80px 44px;gap:8px;align-items:center}.report-vehicle-bar>div{height:8px;background:#eaf0f4}.report-vehicle-bar i{display:block;height:100%;background:#16a6b5}.report-table-wrap{overflow:visible}.report-document table{width:100%;border-collapse:collapse;font-size:10px}.report-document td,.report-document th{border:1px solid #dce3ea;padding:5px;text-align:left}.report-document td small{display:block;color:#78879a;font-size:8px}@media print{body{margin:14mm}}</style></head><body>${reportBodyHtml(report)}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(report.title)}</title><style>body{font-family:Arial,'Microsoft YaHei',sans-serif;color:#0D1B2E;line-height:1.7;margin:32px}h1{font-size:24px;margin:20px 0 8px}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #E2E9F2;padding-bottom:6px}.report-brand{color:#0B7A89;font-weight:bold}.report-brand span{float:right;color:#5D7189;font-weight:normal}.report-meta{color:#5D7189;border-bottom:1px solid #E2E9F2;padding-bottom:14px}.report-document{max-width:900px;margin:0 auto}li,p{font-size:12px}.report-kpis{display:flex;gap:10px}.report-kpis>div{flex:1;padding:10px;border:1px solid #E2E9F2}.report-kpis span,.report-kpis strong{display:block}.report-kpis span{color:#5D7189;font-size:11px}.report-kpis strong{font-size:18px}.report-kpis small{font-size:11px}.report-chart svg{width:100%}.report-chart-legend{display:flex;gap:12px;font-size:10px}.report-chart-legend span{display:inline-flex;align-items:center;gap:4px}.report-chart-legend i{display:inline-block;width:8px;height:8px;border-radius:50%}.report-vehicle-chart{display:grid;gap:8px}.report-vehicle-bar{display:grid;grid-template-columns:90px 1fr 80px 44px;gap:8px;align-items:center}.report-vehicle-bar>div{height:8px;background:#eaf0f4}.report-vehicle-bar i{display:block;height:100%;background:#0FB5C6}.report-table-wrap{overflow:visible}.report-document table{width:100%;border-collapse:collapse;font-size:10px}.report-document td,.report-document th{border:1px solid #E2E9F2;padding:5px;text-align:left}.report-document td small{display:block;color:#5D7189;font-size:8px}@media print{body{margin:14mm}}</style></head><body>${reportBodyHtml(report)}</body></html>`;
 }
 
 function printReport(report) {
@@ -1270,6 +1339,19 @@ function printReport(report) {
   preview.document.close();
   preview.focus();
   setTimeout(() => preview.print(), 250);
+}
+
+function copyTextViaExec(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (error) { ok = false; }
+  textarea.remove();
+  return ok;
 }
 
 function handleClick(root, event) {
@@ -1529,6 +1611,63 @@ function handleClick(root, event) {
   const review = event.target.closest("[data-review]");
   if (review) {
     handleReview(root, review.dataset.trip, review.dataset.review);
+    return;
+  }
+  if (event.target.closest("[data-toggle-rail]")) {
+    monitorRailOpen = !railExpanded();
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-stop-chat]")) {
+    chatQueryId += 1;
+    clearTimeout(chatStreamTimer);
+    clearInterval(chatStreamTimer);
+    chatStreamText = chatAnswer.answer;
+    chatState = "complete";
+    notice = "已停止生成，显示完整结果";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-copy-answer]")) {
+    const text = chatAnswer?.answer || "";
+    const finish = (copied) => {
+      notice = copied ? "已复制回答文本" : "复制失败，请手动选择文本";
+      render(root);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => finish(true)).catch(() => finish(copyTextViaExec(text)));
+    } else {
+      finish(copyTextViaExec(text));
+    }
+    return;
+  }
+  if (event.target.closest("[data-regenerate]")) {
+    startChatQuery(root, chatQuestion, selectedChat);
+    return;
+  }
+  const feedbackVote = event.target.closest("[data-feedback-vote]");
+  if (feedbackVote) {
+    const { trip: tripId, feedbackVote: vote } = feedbackVote.dataset;
+    if (vote === "accurate") {
+      aiFeedback[tripId] = { vote: "accurate", reason: "" };
+      notice = "反馈已记录（演示）";
+    } else {
+      feedbackOpenTripId = tripId;
+    }
+    render(root);
+    return;
+  }
+  const feedbackReason = event.target.closest("[data-feedback-reason]");
+  if (feedbackReason) {
+    aiFeedback[feedbackReason.dataset.trip] = { vote: "inaccurate", reason: feedbackReason.dataset.feedbackReason };
+    feedbackOpenTripId = null;
+    notice = "反馈已记录，AI 判定将参考人工结论优化（演示）";
+    render(root);
+    return;
+  }
+  if (event.target.closest("[data-cancel-feedback]")) {
+    feedbackOpenTripId = null;
+    render(root);
     return;
   }
   if (event.target.closest("[data-cancel-workflow]")) {
