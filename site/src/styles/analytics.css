@@ -1,0 +1,56 @@
+/* 生产与运力分析：三类指标独立展示，趋势 + 分布 + 明细 + 来源 */
+.mined { --series: var(--series-mined); }
+.transport { --series: var(--series-transport); }
+.unload { --series: var(--series-unload); }
+
+.analytics-kpi { position: relative; --tone: var(--series); padding-right: 46%; overflow: hidden; }
+.analytics-kpi strong { color: var(--series); }
+.kpi-spark { position: absolute; top: 16px; right: 16px; bottom: 16px; display: flex; align-items: flex-end; gap: 3px; width: 40%; }
+.kpi-spark i { flex: 1; min-height: 4px; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, var(--series), color-mix(in srgb, var(--series) 30%, transparent)); opacity: .85; }
+
+.analytics-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); align-items: start; gap: 16px; }
+.analytics-main { display: grid; gap: 16px; min-width: 0; }
+.analytics-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+
+.chart-legend { display: flex; align-items: center; gap: 16px; margin-bottom: 6px; color: var(--text-2); font-size: 12px; flex-wrap: wrap; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); box-shadow: 0 0 6px var(--series); }
+.chart-legend small { margin-left: auto; color: var(--muted); }
+.trend-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-gridline { fill: none; stroke: var(--chart-grid); stroke-width: 1; }
+.chart-axis text, .chart-hit text { fill: var(--chart-label); font-size: 12px; }
+.chart-hit text { text-anchor: middle; }
+.chart-series { fill: none; stroke: var(--series); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--series) 60%, transparent)); }
+.chart-point { fill: var(--surface); stroke: var(--series); stroke-width: 2; }
+.chart-hit { cursor: pointer; outline: none; }
+.chart-hit rect { fill: transparent; }
+.chart-hit:hover rect, .chart-hit:focus-visible rect { fill: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chart-hit.selected rect { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.chart-hit.selected text { fill: var(--accent-2); font-weight: 700; }
+
+.bar-list { display: grid; gap: 12px; }
+.bar-list > div { display: grid; grid-template-columns: 76px 1fr 96px; align-items: center; gap: 10px; font-size: 13px; }
+.bar-list span { color: var(--text-2); }
+.bar-list i, .capacity-bar i { display: block; height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.bar-list b, .capacity-bar b { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--series, var(--accent)) 55%, transparent), var(--series, var(--accent))); }
+.bar-list strong { font-weight: 600; text-align: right; }
+.capacity-bar { display: grid; grid-template-columns: minmax(80px, 1fr) auto; align-items: center; gap: 10px; min-width: 200px; --series: var(--cyan); }
+
+.source-panel { position: sticky; top: 76px; display: grid; gap: 14px; }
+.source-panel .panel-head { margin-bottom: 0; }
+.source-metrics { display: grid; gap: 10px; }
+.source-metric { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--series); border-radius: 8px; background: var(--surface-2); }
+.source-metric > div { display: flex; align-items: center; gap: 8px; }
+.source-metric i { width: 8px; height: 8px; border-radius: 50%; background: var(--series); }
+.source-metric span { color: var(--text-2); font-size: 13px; }
+.source-metric strong { margin-left: auto; color: var(--series); font-size: 18px; }
+.source-metric small { color: var(--muted); font-size: 12px; }
+.source-metric .text-button { width: fit-content; font-size: 12px; }
+
+@media (max-width: 1280px) {
+  .analytics-layout { grid-template-columns: 1fr; }
+  .source-panel { position: static; }
+}
+@media (max-width: 900px) {
+  .analytics-pair { grid-template-columns: 1fr; }
+}

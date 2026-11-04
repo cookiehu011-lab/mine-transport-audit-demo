@@ -1,0 +1,35 @@
+/* 车辆档案与结算预览：左右分栏的档案类页面 */
+.vehicle-layout { display: grid; grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); align-items: start; gap: 16px; }
+.vehicle-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.vehicle-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 14px; }
+
+.tare-chart { display: grid; gap: 8px; }
+.tare-plot { position: relative; height: 170px; margin: 18px 0 4px; border-bottom: 1px solid var(--line); }
+.tare-band { position: absolute; right: 0; left: 0; background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.tare-mean { position: absolute; right: 0; left: 0; border-top: 1px dashed var(--muted); }
+.tare-mean em { position: absolute; top: -18px; right: 0; color: var(--muted); font-size: 11px; font-style: normal; }
+.tare-dot { position: absolute; width: 12px; height: 12px; border: 2px solid var(--accent-2); border-radius: 50%; background: var(--surface-2); transform: translate(-50%, -50%); }
+.tare-dot b { position: absolute; bottom: 14px; left: 50%; color: var(--text-2); font-size: 12px; font-weight: 600; transform: translateX(-50%); white-space: nowrap; }
+.tare-dot.abnormal { border-color: var(--danger); background: var(--danger); }
+.tare-dot.abnormal b { color: var(--danger); }
+.tare-dot.current { width: 14px; height: 14px; border-color: var(--warn); background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+.tare-dot.current b { color: var(--warn); }
+.tare-axis { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; color: var(--muted); font-size: 11px; text-align: center; }
+.tare-axis span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.settlement-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); align-items: start; gap: 16px; }
+.data-table .settlement-net { color: var(--accent-2); font-weight: 700; }
+.data-table tfoot td { padding: 10px 12px; border-top: 1px solid var(--line-strong); background: var(--surface-2); color: var(--text-2); font-weight: 600; }
+.excluded-head { margin-top: 18px; }
+.settlement-math { display: grid; gap: 6px; margin-bottom: 14px; }
+.settlement-math span { color: var(--muted); font-size: 12px; }
+.settlement-math strong { color: var(--accent-2); font-size: 20px; }
+.settlement-math small { margin-left: 4px; color: var(--muted); font-size: 13px; }
+.settlement-kv { margin-bottom: 14px; }
+
+@media (max-width: 1280px) {
+  .vehicle-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .vehicle-layout, .settlement-layout { grid-template-columns: 1fr; }
+}

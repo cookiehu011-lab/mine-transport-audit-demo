@@ -1,0 +1,59 @@
+/* 平台框架：顶栏 + 左侧分组导航 */
+.app-shell { display: grid; grid-template-columns: 228px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); grid-template-areas: "top top" "nav main"; min-height: 100vh; background: var(--page); }
+.app-shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+.app-topbar { grid-area: top; position: sticky; top: 0; z-index: 900; display: flex; align-items: center; gap: 16px; min-width: 0; padding: 0 22px 0 16px; border-bottom: 1px solid var(--line); background: var(--topbar); }
+.brand { display: flex; flex: none; align-items: center; gap: 10px; color: var(--text); font-size: 16px; font-weight: 650; letter-spacing: .04em; }
+.brand-mark { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FFCF6B, #FF8A1F 55%, #C4400F); box-shadow: 0 0 14px rgba(255, 140, 40, .45); }
+.brand-mark svg { width: 17px; height: 13px; fill: #fff; }
+.global-context { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; margin-left: 12px; overflow: hidden; }
+.scope-chip { display: inline-flex; flex: none; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-2); color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.scope-icon { display: inline-flex; width: 14px; height: 14px; color: var(--muted); }
+.scope-icon svg { width: 14px; height: 14px; }
+.global-site-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.topbar-actions { display: flex; flex: none; align-items: center; gap: 12px; }
+.theme-switch { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-2); color: var(--text-2); cursor: pointer; font-size: 12px; }
+.theme-switch:hover, .round-button:hover, .customer-quick-link:hover { border-color: var(--line-strong); color: var(--text); }
+.theme-switch svg, .round-button svg { width: 16px; height: 16px; }
+.round-button { position: relative; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-2); color: var(--text-2); cursor: pointer; }
+.round-badge { position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #D42F42; color: #fff; font-size: 11px; font-weight: 650; line-height: 17px; box-shadow: 0 0 8px rgba(255, 93, 108, .55); }
+.customer-quick-link { height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-2); color: var(--text-2); cursor: pointer; font-size: 12px; }
+.operator-avatar { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: linear-gradient(135deg, #2C62E8, #127FA6); color: #fff; font-size: 12px; font-weight: 650; }
+.operator-name { color: var(--text-2); font-size: 12px; }
+
+.side-nav { grid-area: nav; position: sticky; top: 60px; display: flex; flex-direction: column; height: calc(100vh - 60px); padding: 10px 12px 0; overflow: visible; border-right: 1px solid var(--line); background: var(--sidebar); }
+.nav-group { padding: 14px 14px 8px; color: var(--muted); font-size: 12px; letter-spacing: .08em; }
+.nav-item { position: relative; display: flex; flex: none; align-items: center; gap: 12px; width: 100%; height: 46px; margin-bottom: 2px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; font-size: 15px; text-align: left; }
+.nav-item svg { width: 20px; height: 20px; flex: none; }
+.nav-item:hover { background: var(--row); color: var(--text); }
+.nav-item.active { border-color: var(--line-strong); background: var(--nav-active); color: var(--text); font-weight: 650; box-shadow: inset 0 0 18px rgba(61, 123, 255, .12); }
+.nav-item.active svg { color: var(--accent-2); }
+.nav-item.active::before { position: absolute; top: 12px; bottom: 12px; left: -13px; width: 3px; border-radius: 2px; background: var(--accent-2); box-shadow: var(--glow); content: ""; }
+.nav-count { display: grid; min-width: 20px; height: 18px; place-items: center; margin-left: auto; padding: 0 5px; border-radius: 9px; background: var(--warn); color: #1B1100; font-size: 11px; font-weight: 650; }
+:root:not([data-theme="dark"]) .nav-count { color: #fff; }
+.nav-fold { position: absolute; top: 50%; right: -14px; z-index: 20; display: grid; width: 28px; height: 56px; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text-2); cursor: pointer; transform: translateY(-50%); box-shadow: 0 4px 14px rgba(0, 0, 0, .14); transition: color .2s, border-color .2s, transform .2s; }
+.nav-fold:hover { color: var(--accent); border-color: var(--line-strong); }
+.nav-fold svg { width: 16px; height: 16px; }
+.sidebar-collapsed .nav-label, .sidebar-collapsed .nav-group, .sidebar-collapsed .nav-count { display: none; }
+.sidebar-collapsed .nav-item { justify-content: center; padding: 0; }
+.main-content { grid-area: main; min-width: 0; padding: 0; }
+
+
+
+@media (max-width: 900px) {
+  .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; grid-template-areas: "top" "nav" "main"; }
+  .app-topbar { position: static; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  .global-context { order: 3; flex-basis: 100%; margin-left: 0; }
+  .operator-name, .customer-quick-link { display: none; }
+  .theme-switch span { display: none; }
+  .side-nav { position: sticky; top: 0; z-index: 800; flex-direction: row; height: auto; padding: 6px 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nav-group, .nav-fold { display: none; }
+  .nav-item { width: auto; height: 38px; margin: 0; font-size: 13px; }
+  .nav-item.active::before { display: none; }
+  .sidebar-collapsed .nav-label { display: inline; }
+  .page { padding: 14px; }
+}
+@media (max-width: 900px) {
+  .page-head { align-items: stretch; flex-direction: column; }
+  .page-actions { flex-wrap: wrap; }
+  .page-actions .module-search { width: 100%; }
+}
